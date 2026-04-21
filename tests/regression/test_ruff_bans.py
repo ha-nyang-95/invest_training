@@ -49,14 +49,23 @@ def _ruff_check(filepath: Path) -> tuple[int, str]:
 
 
 @pytest.mark.parametrize(
+    # Matches bare "TID" rather than "TID253" so the assertion survives rule-code
+    # renames across ruff versions; both TID251 and TID253 share the prefix.
     "source,expected_code,expected_msg_substring",
     [
         ("import pandas\n", "TID", "Enforcement-Guidelines #3"),
         ("import requests\n", "TID", "Enforcement-Guidelines #4"),
         ("from urllib import request\n", "TID", "Enforcement-Guidelines #4"),
+        ("import urllib.request\n", "TID", "Enforcement-Guidelines #4"),
         ("from datetime import datetime\nx = datetime.now()\n", "DTZ", ""),
     ],
-    ids=["pandas-banned", "requests-banned", "urllib-request-banned", "naive-datetime-banned"],
+    ids=[
+        "pandas-banned",
+        "requests-banned",
+        "urllib-from-request-banned",
+        "urllib-dotted-request-banned",
+        "naive-datetime-banned",
+    ],
 )
 def test_ruff_detects_violation(
     tmp_path: Path,

@@ -71,7 +71,7 @@ strict = true
 python_version = "3.13"
 mypy_path = "packages/athena-core:packages/athena-feature-store:packages/athena-alpha-defense:packages/athena-ops-defense:packages/athena-orchestrator:packages/athena-execution"
 plugins = ["pydantic.mypy"]
-exclude = ["_bmad", "_bmad-output", "\\.venv", "build", "dist", "tests/"]
+exclude = ["^_bmad/", "^_bmad-output/", "^\\.venv/", "^build/", "^dist/", "(^|/)tests/"]
 
 # Generated _version.py has no type annotations beyond the simple ones we declare.
 [[tool.mypy.overrides]]

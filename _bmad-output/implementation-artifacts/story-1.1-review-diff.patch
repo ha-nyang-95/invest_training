@@ -1,0 +1,1362 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+new file mode 100644
+index 0000000..c0768b0
+--- /dev/null
++++ b/.github/workflows/ci.yml
+@@ -0,0 +1,46 @@
++name: scaffold-gate
++
++# Story 1.1 Task 8 — baseline CI for the uv monorepo scaffold.
++# Story 1.3 will (a) migrate runs-on to [self-hosted, trading-pc] (AR-INF3),
++# (b) add the full 7-stage pipeline (snapshot regression, 72h cooling gate, Paper run gate).
++# Intentionally NOT named "ci" — leaves room for the Story 1.3 workflow rename.
++
++on:
++  push:
++    branches: [master, main]
++  pull_request:
++  workflow_dispatch:
++
++permissions:
++  contents: read
++
++jobs:
++  scaffold-gate:
++    runs-on: ubuntu-latest
++    timeout-minutes: 20
++    steps:
++      - name: Checkout (full history so hatch_build.py git describe works)
++        uses: actions/checkout@v4
++        with:
++          fetch-depth: 0
++
++      - name: Install uv 0.11.7 (pinned per architecture.md line 192)
++        uses: astral-sh/setup-uv@v3
++        with:
++          version: "0.11.7"
++          enable-cache: true
++
++      - name: Install Python 3.13 (pinned per .python-version)
++        run: uv python install 3.13
++
++      - name: Sync workspace (frozen lockfile + dev group)
++        run: uv sync --frozen --group dev
++
++      - name: pre-commit hooks (ruff + mypy + hygiene + secret scanner)
++        run: uv run pre-commit run --all-files --show-diff-on-failure
++
++      - name: import-linter (layer + forbidden contracts)
++        run: uv run lint-imports
++
++      - name: pytest (parallel via pytest-xdist)
++        run: uv run pytest -n auto
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..f2c01fe
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,34 @@
++# Python
++__pycache__/
++*.egg-info/
++dist/
++build/
++.mypy_cache/
++.ruff_cache/
++.pytest_cache/
++
++# uv venv
++.venv/
++
++# Hatchling auto-generated version files (Story 1.1 AC-5)
++packages/*/athena/*/_version.py
++
++# Data and secrets (NFR-S1: .env forbidden forever)
++data/
++.env
++.env.*
++
++# BMAD: track artifacts (_bmad/, _bmad-output/), ignore caches only
++_bmad/cache/
++
++# IDE/Tool Specific
++.agents/
++.gemini/
++.claude/
++
++# Node (defensive)
++node_modules/
++
++# OS
++.DS_Store
++Thumbs.db
+diff --git a/.importlinter b/.importlinter
+new file mode 100644
+index 0000000..fe61220
+--- /dev/null
++++ b/.importlinter
+@@ -0,0 +1,54 @@
++[importlinter]
++root_packages =
++    athena.core
++    athena.feature_store
++    athena.alpha_defense
++    athena.ops_defense
++    athena.orchestrator
++    athena.execution
++
++[importlinter:contract:layers]
++name = Athena layer order (one-way only)
++type = layers
++layers =
++    athena.execution
++    athena.orchestrator
++    athena.alpha_defense | athena.ops_defense
++    athena.feature_store
++    athena.core
++
++[importlinter:contract:core-leaf]
++name = athena.core is a leaf (no athena.* deps)
++type = forbidden
++source_modules =
++    athena.core
++forbidden_modules =
++    athena.feature_store
++    athena.alpha_defense
++    athena.ops_defense
++    athena.orchestrator
++    athena.execution
++
++[importlinter:contract:execution-no-orchestrator]
++name = execution MUST NOT import orchestrator (DTO interface only - AR-BND2)
++type = forbidden
++source_modules =
++    athena.execution
++forbidden_modules =
++    athena.orchestrator
++
++[importlinter:contract:alpha-no-execution]
++name = alpha_defense MUST NOT import execution
++type = forbidden
++source_modules =
++    athena.alpha_defense
++forbidden_modules =
++    athena.execution
++
++[importlinter:contract:ops-no-execution]
++name = ops_defense MUST NOT import execution
++type = forbidden
++source_modules =
++    athena.ops_defense
++forbidden_modules =
++    athena.execution
+diff --git a/.pre-commit-config.yaml b/.pre-commit-config.yaml
+new file mode 100644
+index 0000000..ad8d036
+--- /dev/null
++++ b/.pre-commit-config.yaml
+@@ -0,0 +1,47 @@
++# Story 1.1 Task 7 — pre-commit hook chain enforcing AR-CQ1..5 + architecture bans.
++# Run order matters: ruff fixes auto-fixable issues first, then mypy/scanners verify.
++
++default_language_version:
++  python: python3.13
++
++# Skip generated/external files everywhere.
++exclude: |
++  (?x)^(
++    \.venv/.*|
++    _bmad/.*|
++    _bmad-output/.*|
++    .*/_version\.py|
++    build/.*|
++    dist/.*
++  )$
++
++repos:
++  # AR-CQ1: ruff lint + format (architecture bans live in [tool.ruff] of pyproject.toml)
++  - repo: https://github.com/astral-sh/ruff-pre-commit
++    rev: v0.15.11
++    hooks:
++      - id: ruff
++        args: [--fix]
++      - id: ruff-format
++
++  # AR-CQ3: mypy strict on packages only (tests excluded by [tool.mypy].exclude in pyproject.toml)
++  - repo: https://github.com/pre-commit/mirrors-mypy
++    rev: v1.20.1
++    hooks:
++      - id: mypy
++        args: [--strict]
++        files: ^packages/[^/]+/athena/[^/]+/.*\.py$
++        additional_dependencies:
++          - pydantic>=2,<3
++          - pydantic-settings>=2,<3
++
++  # AR-SEC1 placeholder + NFR-S1: never commit secrets/keys.
++  - repo: https://github.com/pre-commit/pre-commit-hooks
++    rev: v5.0.0
++    hooks:
++      - id: detect-private-key
++      - id: check-yaml
++      - id: check-toml
++      - id: check-merge-conflict
++      - id: end-of-file-fixer
++      - id: trailing-whitespace
+diff --git a/.python-version b/.python-version
+new file mode 100644
+index 0000000..24ee5b1
+--- /dev/null
++++ b/.python-version
+@@ -0,0 +1 @@
++3.13
+diff --git a/packages/athena-alpha-defense/athena/alpha_defense/__init__.py b/packages/athena-alpha-defense/athena/alpha_defense/__init__.py
+new file mode 100644
+index 0000000..e985a40
+--- /dev/null
++++ b/packages/athena-alpha-defense/athena/alpha_defense/__init__.py
+@@ -0,0 +1 @@
++"""athena.alpha_defense — 52-Flag Veto Gate. Depends on athena.core + athena.feature_store."""
+diff --git a/packages/athena-alpha-defense/pyproject.toml b/packages/athena-alpha-defense/pyproject.toml
+new file mode 100644
+index 0000000..2cde2bf
+--- /dev/null
++++ b/packages/athena-alpha-defense/pyproject.toml
+@@ -0,0 +1,17 @@
++[project]
++name = "athena-alpha-defense"
++version = "0.1.0"
++requires-python = ">=3.13,<3.14"
++description = "Athena alpha defense — 52-Flag Veto Gate (M1~M14, S_entry). Depends on core + feature_store."
++dependencies = [
++    "athena-core",
++    "athena-feature-store",
++]
++
++[build-system]
++requires = ["hatchling"]
++build-backend = "hatchling.build"
++
++[tool.hatch.build.targets.wheel]
++packages = ["athena"]
++only-include = ["athena/alpha_defense"]
+diff --git a/packages/athena-alpha-defense/tests/__init__.py b/packages/athena-alpha-defense/tests/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/packages/athena-alpha-defense/tests/test_smoke.py b/packages/athena-alpha-defense/tests/test_smoke.py
+new file mode 100644
+index 0000000..98a12e7
+--- /dev/null
++++ b/packages/athena-alpha-defense/tests/test_smoke.py
+@@ -0,0 +1,4 @@
++def test_import() -> None:
++    import athena.alpha_defense
++
++    assert athena.alpha_defense.__doc__ is not None
+diff --git a/packages/athena-core/athena/core/__init__.py b/packages/athena-core/athena/core/__init__.py
+new file mode 100644
+index 0000000..9545739
+--- /dev/null
++++ b/packages/athena-core/athena/core/__init__.py
+@@ -0,0 +1,4 @@
++"""athena.core — leaf package (no athena-* deps).
++
++Source-of-truth for BaseDTO, ErrorCode, version, time utilities.
++"""
+diff --git a/packages/athena-core/athena/core/dto.py b/packages/athena-core/athena/core/dto.py
+new file mode 100644
+index 0000000..3d4d395
+--- /dev/null
++++ b/packages/athena-core/athena/core/dto.py
+@@ -0,0 +1,41 @@
++"""BaseDTO — 3-field contract enforced on every cross-module DTO.
++
++Source-of-truth: architecture.md#Format-Patterns (lines 476-491), PRD NFR-M1.
++
++Every DTO in any Athena package MUST inherit from BaseDTO so that:
++- `timestamp` is UTC-aware (Enforcement #6: naive datetime forbidden)
++- `module_version` follows semver (NFR-M2)
++- `policy_version_git_sha` embeds product identity (D15 / AR-COM4)
++
++Pydantic 2.x ConfigDict: frozen + strict + extra=forbid.
++"""
++
++from __future__ import annotations
++
++from datetime import datetime
++from typing import Annotated
++
++from pydantic import BaseModel, ConfigDict, Field, field_validator
++
++# Pydantic 2 uses Rust regex engine for Field(pattern=...). The patterns below
++# stay deliberately simple (anchors + alternation) to remain Rust-compatible.
++_MODULE_VERSION_PATTERN = r"^M\d+\.v\d+\.\d+\.\d+$|^[a-z_-]+\.v\d+\.\d+\.\d+$"
++_POLICY_SHA_PATTERN = r"^[0-9a-f]{7,40}(-dirty)?$"
++
++
++class BaseDTO(BaseModel):
++    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
++
++    timestamp: datetime
++    module_version: Annotated[str, Field(pattern=_MODULE_VERSION_PATTERN)]
++    policy_version_git_sha: Annotated[str, Field(pattern=_POLICY_SHA_PATTERN)]
++
++    @field_validator("timestamp")
++    @classmethod
++    def _require_timezone_aware(cls, value: datetime) -> datetime:
++        if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
++            raise ValueError(
++                "timestamp must be timezone-aware (UTC); naive datetime forbidden "
++                "per architecture.md#Enforcement-Guidelines #6"
++            )
++        return value
+diff --git a/packages/athena-core/athena/core/errors.py b/packages/athena-core/athena/core/errors.py
+new file mode 100644
+index 0000000..7b8f289
+--- /dev/null
++++ b/packages/athena-core/athena/core/errors.py
+@@ -0,0 +1,30 @@
++"""ErrorCode taxonomy + AthenaError hierarchy.
++
++Source-of-truth: architecture.md#D14 (lines 314-325).
++
++The 8 ErrorCode values are FROZEN — adding values requires a Change Control
++slot (NFR-M3, max 1 change per 12 weeks). Do not anticipate future codes here.
++"""
++
++from __future__ import annotations
++
++from enum import StrEnum
++
++
++class ErrorCode(StrEnum):
++    KIS_RATE_LIMIT = "KIS_RATE_LIMIT"
++    FEATURE_MISSING = "FEATURE_MISSING"
++    LLM_TIMEOUT = "LLM_TIMEOUT"
++    CONFIDENCE_BELOW_THRESHOLD = "CONFIDENCE_BELOW_THRESHOLD"
++    DATA_STALE = "DATA_STALE"
++    HEARTBEAT_LOST = "HEARTBEAT_LOST"
++    SLIPPAGE_EXCEEDED = "SLIPPAGE_EXCEEDED"
++    POLICY_NOT_COOLED = "POLICY_NOT_COOLED"
++
++
++class AthenaError(Exception):
++    """Base exception for all Athena-internal errors."""
++
++
++class MissingSecretError(AthenaError):
++    """A required secret was not present in the OS Keychain (resolved by Story 1.2)."""
+diff --git a/packages/athena-core/athena/core/time.py b/packages/athena-core/athena/core/time.py
+new file mode 100644
+index 0000000..d2f15a3
+--- /dev/null
++++ b/packages/athena-core/athena/core/time.py
+@@ -0,0 +1,26 @@
++"""Timezone utilities — Asia/Seoul ↔ UTC.
++
++Stub for downstream stories (DTO timestamp validators, KIS API time
++serialization). Naive datetime is forbidden everywhere; both helpers raise
++ValueError on naive input per Enforcement #6.
++"""
++
++from __future__ import annotations
++
++from datetime import datetime
++from zoneinfo import ZoneInfo
++
++_KST = ZoneInfo("Asia/Seoul")
++_UTC = ZoneInfo("UTC")
++
++
++def kst_to_utc(dt: datetime) -> datetime:
++    if dt.tzinfo is None:
++        raise ValueError("kst_to_utc requires timezone-aware datetime; naive input forbidden")
++    return dt.astimezone(_UTC)
++
++
++def utc_to_kst(dt: datetime) -> datetime:
++    if dt.tzinfo is None:
++        raise ValueError("utc_to_kst requires timezone-aware datetime; naive input forbidden")
++    return dt.astimezone(_KST)
+diff --git a/packages/athena-core/athena/core/version.py b/packages/athena-core/athena/core/version.py
+new file mode 100644
+index 0000000..0571cb7
+--- /dev/null
++++ b/packages/athena-core/athena/core/version.py
+@@ -0,0 +1,24 @@
++"""Version identity (POLICY_VERSION_SHA, MODULE_VERSION) — hand-written.
++
++Reads from `._version` which is generated at build time by
++`packages/athena-core/hatch_build.py` (Story 1.1 AC-5). When the module is loaded
++from a fresh source tree before any build has run, falls back to "unknown-dev".
++
++CRITICAL (AR-COM4 — Story 1.1 Task 4.7 enforces via AST inspection):
++This module MUST NOT call subprocess, os.popen, os.system, or shutil at runtime.
++The Hatchling build hook is the ONLY sanctioned source of git SHA.
++"""
++
++from __future__ import annotations
++
++try:
++    from . import _version
++
++    POLICY_VERSION_SHA: str = _version.__commit__
++except (ImportError, AttributeError):
++    POLICY_VERSION_SHA = "unknown-dev"
++
++# Static semver; bumped only by a Change Control story (NFR-M2/M3).
++_PACKAGE_SEMVER = "0.1.0"
++
++MODULE_VERSION: str = f"{_PACKAGE_SEMVER}+{POLICY_VERSION_SHA[:8]}"
+diff --git a/packages/athena-core/hatch_build.py b/packages/athena-core/hatch_build.py
+new file mode 100644
+index 0000000..88a358a
+--- /dev/null
++++ b/packages/athena-core/hatch_build.py
+@@ -0,0 +1,50 @@
++"""Hatchling custom build hook — inject git SHA + build timestamp into athena/core/_version.py.
++
++This is the ONLY sanctioned source of POLICY_VERSION_SHA (AR-COM4 / Story 1.1 AC-5).
++The hook runs once during `uv build` / `hatch build`, calls `git describe --always --dirty`,
++and writes a static `_version.py` consumed by `athena.core.version` at runtime.
++Runtime subprocess calls are forbidden — see test_version_no_shell.py.
++"""
++
++from __future__ import annotations
++
++import subprocess
++from datetime import UTC, datetime
++from pathlib import Path
++from typing import Any
++
++from hatchling.builders.hooks.plugin.interface import BuildHookInterface
++
++
++class CustomBuildHook(BuildHookInterface):
++    PLUGIN_NAME = "custom"
++
++    def initialize(self, version: str, build_data: dict[str, Any]) -> None:
++        commit = self._git_describe()
++        build_time = datetime.now(UTC).isoformat()
++
++        version_file = Path(self.root) / "athena" / "core" / "_version.py"
++        version_file.parent.mkdir(parents=True, exist_ok=True)
++        version_file.write_text(
++            "# AUTO-GENERATED by hatch_build.py - DO NOT EDIT\n"
++            f'__commit__: str = "{commit}"\n'
++            f'__build_time_utc__: str = "{build_time}"\n',
++            encoding="utf-8",
++        )
++
++    @staticmethod
++    def _git_describe() -> str:
++        try:
++            result = subprocess.run(
++                ["git", "describe", "--always", "--dirty"],
++                capture_output=True,
++                text=True,
++                check=False,
++                timeout=10,
++            )
++            output = result.stdout.strip()
++            if result.returncode == 0 and output:
++                return output
++        except (FileNotFoundError, subprocess.SubprocessError, OSError):
++            pass
++        return "unknown-dev"
+diff --git a/packages/athena-core/pyproject.toml b/packages/athena-core/pyproject.toml
+new file mode 100644
+index 0000000..15bac86
+--- /dev/null
++++ b/packages/athena-core/pyproject.toml
+@@ -0,0 +1,26 @@
++[project]
++name = "athena-core"
++version = "0.1.0"
++requires-python = ">=3.13,<3.14"
++description = "Athena core — leaf package: BaseDTO, ErrorCode, version, time utilities (no athena-* deps)"
++dependencies = [
++    "pydantic>=2,<3",
++    "pydantic-settings>=2,<3",
++    "keyring>=25",
++    # Windows lacks system tzdata; ZoneInfo("Asia/Seoul") in athena.core.time
++    # (and transitively in pykis) needs the IANA database from PyPI.
++    "tzdata>=2024; sys_platform == 'win32'",
++]
++
++[build-system]
++requires = ["hatchling"]
++build-backend = "hatchling.build"
++
++[tool.hatch.build.targets.wheel]
++packages = ["athena"]
++only-include = ["athena/core"]
++
++# Story 1.1 AC-5: hatch_build.py generates athena/core/_version.py at build time
++# (git describe + ISO 8601 UTC). Runtime subprocess calls are banned (AR-COM4).
++[tool.hatch.build.hooks.custom]
++path = "hatch_build.py"
+diff --git a/packages/athena-core/tests/__init__.py b/packages/athena-core/tests/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/packages/athena-core/tests/test_dto.py b/packages/athena-core/tests/test_dto.py
+new file mode 100644
+index 0000000..47e8a3c
+--- /dev/null
++++ b/packages/athena-core/tests/test_dto.py
+@@ -0,0 +1,75 @@
++"""BaseDTO 3-field contract tests (Story 1.1 Task 4.5)."""
++
++from __future__ import annotations
++
++from datetime import UTC, datetime
++from typing import Any
++
++import pytest
++from athena.core.dto import BaseDTO
++from pydantic import ValidationError
++
++
++def _valid(**overrides: Any) -> dict[str, Any]:
++    base: dict[str, Any] = {
++        "timestamp": datetime(2026, 4, 21, 12, 0, 0, tzinfo=UTC),
++        "module_version": "M1.v0.1.0",
++        "policy_version_git_sha": "a3f2d1c",
++    }
++    base.update(overrides)
++    return base
++
++
++def test_accepts_valid_utc_aware_input() -> None:
++    dto = BaseDTO(**_valid())
++    assert dto.timestamp.tzinfo is not None
++    assert dto.module_version == "M1.v0.1.0"
++    assert dto.policy_version_git_sha == "a3f2d1c"
++
++
++def test_accepts_module_version_with_lowercase_context_prefix() -> None:
++    dto = BaseDTO(**_valid(module_version="alpha_defense.v0.1.0"))
++    assert dto.module_version == "alpha_defense.v0.1.0"
++
++
++def test_accepts_40_char_sha() -> None:
++    sha40 = "abcdef0123456789" * 2 + "abcdefab"
++    assert len(sha40) == 40
++    dto = BaseDTO(**_valid(policy_version_git_sha=sha40))
++    assert dto.policy_version_git_sha == sha40
++
++
++def test_accepts_dirty_suffix() -> None:
++    dto = BaseDTO(**_valid(policy_version_git_sha="a3f2d1c-dirty"))
++    assert dto.policy_version_git_sha == "a3f2d1c-dirty"
++
++
++def test_rejects_naive_datetime() -> None:
++    with pytest.raises(ValidationError, match="timezone-aware"):
++        BaseDTO(**_valid(timestamp=datetime(2026, 4, 21, 12, 0, 0)))  # noqa: DTZ001
++
++
++def test_rejects_malformed_module_version() -> None:
++    with pytest.raises(ValidationError):
++        BaseDTO(**_valid(module_version="not-semver"))
++
++
++def test_rejects_uppercase_in_policy_sha() -> None:
++    with pytest.raises(ValidationError):
++        BaseDTO(**_valid(policy_version_git_sha="ABCDEF1"))
++
++
++def test_rejects_too_short_sha() -> None:
++    with pytest.raises(ValidationError):
++        BaseDTO(**_valid(policy_version_git_sha="abc123"))  # 6 chars, min is 7
++
++
++def test_rejects_extra_fields() -> None:
++    with pytest.raises(ValidationError):
++        BaseDTO(**_valid(unexpected_field="x"))
++
++
++def test_frozen_prevents_mutation() -> None:
++    dto = BaseDTO(**_valid())
++    with pytest.raises(ValidationError):
++        dto.module_version = "M2.v0.0.1"  # type: ignore[misc]
+diff --git a/packages/athena-core/tests/test_errors.py b/packages/athena-core/tests/test_errors.py
+new file mode 100644
+index 0000000..4dec677
+--- /dev/null
++++ b/packages/athena-core/tests/test_errors.py
+@@ -0,0 +1,45 @@
++"""ErrorCode 8-member contract tests (Story 1.1 Task 4.6)."""
++
++from __future__ import annotations
++
++from athena.core.errors import AthenaError, ErrorCode, MissingSecretError
++
++EXPECTED_MEMBERS = frozenset(
++    {
++        "KIS_RATE_LIMIT",
++        "FEATURE_MISSING",
++        "LLM_TIMEOUT",
++        "CONFIDENCE_BELOW_THRESHOLD",
++        "DATA_STALE",
++        "HEARTBEAT_LOST",
++        "SLIPPAGE_EXCEEDED",
++        "POLICY_NOT_COOLED",
++    }
++)
++
++
++def test_error_code_has_exactly_eight_members() -> None:
++    assert len(list(ErrorCode)) == 8
++
++
++def test_error_code_members_match_architecture_d14() -> None:
++    actual = {member.name for member in ErrorCode}
++    assert actual == EXPECTED_MEMBERS
++
++
++def test_error_code_values_are_strings_matching_names() -> None:
++    for member in ErrorCode:
++        assert isinstance(member.value, str)
++        assert member.value == member.name
++
++
++def test_athena_error_hierarchy() -> None:
++    assert issubclass(MissingSecretError, AthenaError)
++    assert issubclass(AthenaError, Exception)
++
++
++def test_missing_secret_error_can_be_raised_and_caught() -> None:
++    import pytest
++
++    with pytest.raises(AthenaError):
++        raise MissingSecretError("dummy")
+diff --git a/packages/athena-core/tests/test_hatch_hook.py b/packages/athena-core/tests/test_hatch_hook.py
+new file mode 100644
+index 0000000..94d98cf
+--- /dev/null
++++ b/packages/athena-core/tests/test_hatch_hook.py
+@@ -0,0 +1,76 @@
++"""Integration test — Hatchling build hook injects git SHA into wheel (Story 1.1 AC-5)."""
++
++from __future__ import annotations
++
++import re
++import shutil
++import subprocess
++import zipfile
++from datetime import datetime
++from pathlib import Path
++
++import pytest
++
++REPO_ROOT: Path = Path(__file__).resolve().parents[3]
++PACKAGE_NAME = "athena-core"
++
++COMMIT_RE = re.compile(r'^__commit__\s*:\s*str\s*=\s*"([^"]+)"', re.MULTILINE)
++BUILD_TIME_RE = re.compile(r'^__build_time_utc__\s*:\s*str\s*=\s*"([^"]+)"', re.MULTILINE)
++COMMIT_VALUE_RE = re.compile(r"^[0-9a-f]{7,40}(-dirty)?$|^unknown-dev$")
++
++
++@pytest.fixture(scope="module")
++def built_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
++    uv = shutil.which("uv")
++    if uv is None:
++        pytest.skip("uv not on PATH; cannot exercise build hook integration test")
++
++    out_dir = tmp_path_factory.mktemp("dist")
++    result = subprocess.run(
++        [uv, "build", "--package", PACKAGE_NAME, "--wheel", "--out-dir", str(out_dir)],
++        capture_output=True,
++        text=True,
++        cwd=str(REPO_ROOT),
++        timeout=300,
++    )
++    assert result.returncode == 0, (
++        f"uv build failed (exit {result.returncode}):\n"
++        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
++    )
++
++    wheels = sorted(out_dir.glob("athena_core-*.whl"))
++    assert len(wheels) == 1, f"expected exactly one athena-core wheel, got {wheels}"
++    return wheels[0]
++
++
++def test_wheel_contains_generated_version_file(built_wheel: Path) -> None:
++    with zipfile.ZipFile(built_wheel) as zf:
++        names = zf.namelist()
++        assert "athena/core/_version.py" in names, (
++            f"_version.py missing from wheel; contents: {names[:20]}..."
++        )
++
++
++def test_version_file_commit_matches_git_sha_or_fallback(built_wheel: Path) -> None:
++    with zipfile.ZipFile(built_wheel) as zf:
++        content = zf.read("athena/core/_version.py").decode("utf-8")
++
++    match = COMMIT_RE.search(content)
++    assert match, f"__commit__ not found in:\n{content}"
++    commit = match.group(1)
++    assert COMMIT_VALUE_RE.match(commit), (
++        f"__commit__ value {commit!r} does not match expected pattern "
++        f"(7-40 hex with optional -dirty, or 'unknown-dev')"
++    )
++
++
++def test_version_file_build_time_is_iso8601_utc(built_wheel: Path) -> None:
++    with zipfile.ZipFile(built_wheel) as zf:
++        content = zf.read("athena/core/_version.py").decode("utf-8")
++
++    match = BUILD_TIME_RE.search(content)
++    assert match, f"__build_time_utc__ not found in:\n{content}"
++    build_time = match.group(1)
++
++    parsed = datetime.fromisoformat(build_time)
++    assert parsed.tzinfo is not None, f"__build_time_utc__ {build_time!r} is naive"
+diff --git a/packages/athena-core/tests/test_smoke.py b/packages/athena-core/tests/test_smoke.py
+new file mode 100644
+index 0000000..51fce26
+--- /dev/null
++++ b/packages/athena-core/tests/test_smoke.py
+@@ -0,0 +1,4 @@
++def test_import() -> None:
++    import athena.core
++
++    assert athena.core.__doc__ is not None
+diff --git a/packages/athena-core/tests/test_version_no_shell.py b/packages/athena-core/tests/test_version_no_shell.py
+new file mode 100644
+index 0000000..5435d08
+--- /dev/null
++++ b/packages/athena-core/tests/test_version_no_shell.py
+@@ -0,0 +1,81 @@
++"""AST inspection: athena.core.version MUST NOT call shell at runtime (AR-COM4 / AC-5).
++
++The Hatchling build hook (packages/athena-core/hatch_build.py) is the ONLY
++sanctioned source of git SHA. Any runtime invocation of forbidden modules
++violates the principle of "런타임 shell 호출 overhead 0".
++
++This test inspects the AST (not raw source text) so that documentation
++mentioning these names — e.g. in docstrings — does not produce false positives.
++"""
++
++from __future__ import annotations
++
++import ast
++from pathlib import Path
++
++VERSION_FILE: Path = Path(__file__).resolve().parent.parent / "athena" / "core" / "version.py"
++
++FORBIDDEN_TOPLEVEL_MODULES = frozenset({"subprocess", "shutil"})
++
++FORBIDDEN_DOTTED_CALLS = frozenset(
++    {
++        "subprocess.run",
++        "subprocess.Popen",
++        "subprocess.call",
++        "subprocess.check_call",
++        "subprocess.check_output",
++        "os.popen",
++        "os.system",
++        "os.execv",
++        "os.execve",
++        "os.spawnl",
++        "os.spawnv",
++    }
++)
++
++
++def _collect_imports(tree: ast.AST) -> list[str]:
++    found: list[str] = []
++    for node in ast.walk(tree):
++        if isinstance(node, ast.Import):
++            for alias in node.names:
++                found.append(alias.name)
++        elif isinstance(node, ast.ImportFrom):
++            if node.module is not None:
++                found.append(node.module)
++    return found
++
++
++def _collect_dotted_calls(tree: ast.AST) -> list[str]:
++    """Walk ast.Call nodes; report `<Name>.<attr>` patterns (e.g. subprocess.run, os.popen)."""
++    found: list[str] = []
++    for node in ast.walk(tree):
++        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
++            attr = node.func
++            if isinstance(attr.value, ast.Name):
++                found.append(f"{attr.value.id}.{attr.attr}")
++    return found
++
++
++def test_version_file_exists() -> None:
++    assert VERSION_FILE.is_file(), f"expected {VERSION_FILE} to exist"
++
++
++def test_version_module_has_no_forbidden_imports() -> None:
++    tree = ast.parse(VERSION_FILE.read_text(encoding="utf-8"))
++    imports = _collect_imports(tree)
++    violations = [imp for imp in imports if imp.split(".")[0] in FORBIDDEN_TOPLEVEL_MODULES]
++    assert not violations, (
++        f"athena.core.version imports forbidden modules {violations}; "
++        f"per AR-COM4, only the Hatchling build hook may invoke shell."
++    )
++
++
++def test_version_module_has_no_forbidden_calls() -> None:
++    tree = ast.parse(VERSION_FILE.read_text(encoding="utf-8"))
++    calls = _collect_dotted_calls(tree)
++    violations = [call for call in calls if call in FORBIDDEN_DOTTED_CALLS]
++    assert not violations, (
++        f"athena.core.version contains forbidden call patterns {violations}; "
++        f"per AR-COM4, runtime shell invocation is banned."
++    )
+diff --git a/packages/athena-execution/athena/execution/__init__.py b/packages/athena-execution/athena/execution/__init__.py
+new file mode 100644
+index 0000000..e463dbd
+--- /dev/null
++++ b/packages/athena-execution/athena/execution/__init__.py
+@@ -0,0 +1,4 @@
++"""athena.execution — broker adapter, OrderIntent consumer.
++
++Forbidden: import athena.orchestrator (DTO interface only per AR-BND2).
++"""
+diff --git a/packages/athena-execution/pyproject.toml b/packages/athena-execution/pyproject.toml
+new file mode 100644
+index 0000000..dcfb179
+--- /dev/null
++++ b/packages/athena-execution/pyproject.toml
+@@ -0,0 +1,20 @@
++[project]
++name = "athena-execution"
++version = "0.1.0"
++requires-python = ">=3.13,<3.14"
++description = "Athena execution — broker adapter, OrderIntent consumer. Depends on core + feature_store + alpha + ops (NOT orchestrator: DTO interface only)."
++dependencies = [
++    "athena-core",
++    "athena-feature-store",
++    "athena-alpha-defense",
++    "athena-ops-defense",
++    "python-kis>=2",
++]
++
++[build-system]
++requires = ["hatchling"]
++build-backend = "hatchling.build"
++
++[tool.hatch.build.targets.wheel]
++packages = ["athena"]
++only-include = ["athena/execution"]
+diff --git a/packages/athena-execution/tests/__init__.py b/packages/athena-execution/tests/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/packages/athena-execution/tests/test_smoke.py b/packages/athena-execution/tests/test_smoke.py
+new file mode 100644
+index 0000000..ec94e1b
+--- /dev/null
++++ b/packages/athena-execution/tests/test_smoke.py
+@@ -0,0 +1,4 @@
++def test_import() -> None:
++    import athena.execution
++
++    assert athena.execution.__doc__ is not None
+diff --git a/packages/athena-feature-store/athena/feature_store/__init__.py b/packages/athena-feature-store/athena/feature_store/__init__.py
+new file mode 100644
+index 0000000..e2b5ec1
+--- /dev/null
++++ b/packages/athena-feature-store/athena/feature_store/__init__.py
+@@ -0,0 +1 @@
++"""athena.feature_store — DuckDB Feature Store + Polars frames. Depends on athena.core only."""
+diff --git a/packages/athena-feature-store/pyproject.toml b/packages/athena-feature-store/pyproject.toml
+new file mode 100644
+index 0000000..0d11309
+--- /dev/null
++++ b/packages/athena-feature-store/pyproject.toml
+@@ -0,0 +1,18 @@
++[project]
++name = "athena-feature-store"
++version = "0.1.0"
++requires-python = ">=3.13,<3.14"
++description = "Athena feature store — DuckDB Feature Store, Polars in-memory (depends on athena-core)"
++dependencies = [
++    "athena-core",
++    "polars>=1",
++    "duckdb>=1",
++]
++
++[build-system]
++requires = ["hatchling"]
++build-backend = "hatchling.build"
++
++[tool.hatch.build.targets.wheel]
++packages = ["athena"]
++only-include = ["athena/feature_store"]
+diff --git a/packages/athena-feature-store/tests/__init__.py b/packages/athena-feature-store/tests/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/packages/athena-feature-store/tests/test_smoke.py b/packages/athena-feature-store/tests/test_smoke.py
+new file mode 100644
+index 0000000..52f0120
+--- /dev/null
++++ b/packages/athena-feature-store/tests/test_smoke.py
+@@ -0,0 +1,4 @@
++def test_import() -> None:
++    import athena.feature_store
++
++    assert athena.feature_store.__doc__ is not None
+diff --git a/packages/athena-ops-defense/athena/ops_defense/__init__.py b/packages/athena-ops-defense/athena/ops_defense/__init__.py
+new file mode 100644
+index 0000000..eba8b1d
+--- /dev/null
++++ b/packages/athena-ops-defense/athena/ops_defense/__init__.py
+@@ -0,0 +1,4 @@
++"""athena.ops_defense — operational defense (slippage, portfolio cap, anti-ego, 4-layer CBs).
++
++Depends on athena.core + athena.feature_store.
++"""
+diff --git a/packages/athena-ops-defense/pyproject.toml b/packages/athena-ops-defense/pyproject.toml
+new file mode 100644
+index 0000000..b1442b5
+--- /dev/null
++++ b/packages/athena-ops-defense/pyproject.toml
+@@ -0,0 +1,17 @@
++[project]
++name = "athena-ops-defense"
++version = "0.1.0"
++requires-python = ">=3.13,<3.14"
++description = "Athena ops defense — Slippage / Portfolio / Data Quality / Anti-Ego / 4-Layer CB. Depends on core + feature_store."
++dependencies = [
++    "athena-core",
++    "athena-feature-store",
++]
++
++[build-system]
++requires = ["hatchling"]
++build-backend = "hatchling.build"
++
++[tool.hatch.build.targets.wheel]
++packages = ["athena"]
++only-include = ["athena/ops_defense"]
+diff --git a/packages/athena-ops-defense/tests/__init__.py b/packages/athena-ops-defense/tests/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/packages/athena-ops-defense/tests/test_smoke.py b/packages/athena-ops-defense/tests/test_smoke.py
+new file mode 100644
+index 0000000..cbf058a
+--- /dev/null
++++ b/packages/athena-ops-defense/tests/test_smoke.py
+@@ -0,0 +1,4 @@
++def test_import() -> None:
++    import athena.ops_defense
++
++    assert athena.ops_defense.__doc__ is not None
+diff --git a/packages/athena-orchestrator/athena/orchestrator/__init__.py b/packages/athena-orchestrator/athena/orchestrator/__init__.py
+new file mode 100644
+index 0000000..c108129
+--- /dev/null
++++ b/packages/athena-orchestrator/athena/orchestrator/__init__.py
+@@ -0,0 +1,4 @@
++"""athena.orchestrator — main asyncio decision pipeline.
++
++Depends on athena.{core, feature_store, alpha_defense, ops_defense}.
++"""
+diff --git a/packages/athena-orchestrator/pyproject.toml b/packages/athena-orchestrator/pyproject.toml
+new file mode 100644
+index 0000000..926a93c
+--- /dev/null
++++ b/packages/athena-orchestrator/pyproject.toml
+@@ -0,0 +1,20 @@
++[project]
++name = "athena-orchestrator"
++version = "0.1.0"
++requires-python = ">=3.13,<3.14"
++description = "Athena orchestrator — main asyncio decision pipeline. Depends on core + feature_store + alpha + ops."
++dependencies = [
++    "athena-core",
++    "athena-feature-store",
++    "athena-alpha-defense",
++    "athena-ops-defense",
++    "uvloop>=0.22; sys_platform != 'win32'",
++]
++
++[build-system]
++requires = ["hatchling"]
++build-backend = "hatchling.build"
++
++[tool.hatch.build.targets.wheel]
++packages = ["athena"]
++only-include = ["athena/orchestrator"]
+diff --git a/packages/athena-orchestrator/tests/__init__.py b/packages/athena-orchestrator/tests/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/packages/athena-orchestrator/tests/test_smoke.py b/packages/athena-orchestrator/tests/test_smoke.py
+new file mode 100644
+index 0000000..d2db7b5
+--- /dev/null
++++ b/packages/athena-orchestrator/tests/test_smoke.py
+@@ -0,0 +1,4 @@
++def test_import() -> None:
++    import athena.orchestrator
++
++    assert athena.orchestrator.__doc__ is not None
+diff --git a/pyproject.toml b/pyproject.toml
+new file mode 100644
+index 0000000..bff359a
+--- /dev/null
++++ b/pyproject.toml
+@@ -0,0 +1,85 @@
++# Athena workspace root — virtual workspace (no [project] block per Story 1.1 Task 1.4)
++# Source-of-truth for workspace topology only. All actual packages live under packages/*.
++
++[tool.uv.workspace]
++members = ["packages/*"]
++
++[tool.uv.sources]
++athena-core = { workspace = true }
++athena-feature-store = { workspace = true }
++athena-alpha-defense = { workspace = true }
++athena-ops-defense = { workspace = true }
++athena-orchestrator = { workspace = true }
++athena-execution = { workspace = true }
++
++# Dev tooling shared across all 6 workspace packages (PEP 735).
++# Runtime deps live in each package's [project.dependencies] per AR-BND1 layering.
++[dependency-groups]
++dev = [
++    "pytest>=8",
++    "pytest-asyncio>=0.24",
++    "pytest-xdist>=3",
++    "ruff>=0.7",
++    "mypy>=1.13",
++    "pre-commit>=4",
++    "import-linter>=2",
++]
++
++# pytest uses importlib import-mode to avoid test module name collisions
++# across the 6 packages (all define tests/test_*.py) — pytest-official recommendation
++# per https://docs.pytest.org/en/stable/explanation/pythonpath.html#import-modes
++[tool.pytest.ini_options]
++minversion = "8.0"
++addopts = [
++    "--import-mode=importlib",
++    "-ra",
++    "--strict-markers",
++    # pytest-xdist: keep tests from the same file on one worker so the
++    # import-linter regression baseline does not race with the inject/restore tests.
++    "--dist=loadfile",
++]
++testpaths = ["packages", "tests"]
++asyncio_mode = "auto"
++
++# ruff: AR-CQ1 + Enforcement #3/#4/#6 banned-api
++[tool.ruff]
++target-version = "py313"
++line-length = 100
++extend-exclude = [".venv", "_bmad", "_bmad-output", "**/_version.py", "build", "dist"]
++
++[tool.ruff.lint]
++select = ["E", "F", "I", "N", "UP", "B", "S", "TID", "DTZ"]
++
++[tool.ruff.lint.per-file-ignores]
++# Tests use plain asserts (S101) and intentional subprocess (S404, S603).
++"**/tests/**/*.py" = ["S101", "S404", "S603", "S607"]
++"tests/**/*.py" = ["S101", "S404", "S603", "S607"]
++# Build hook intentionally invokes git via subprocess (sanctioned by AR-COM4).
++"packages/*/hatch_build.py" = ["S404", "S603", "S607"]
++
++[tool.ruff.lint.flake8-tidy-imports.banned-api]
++"pandas".msg = "Polars only per architecture.md#Enforcement-Guidelines #3"
++"requests".msg = "httpx.AsyncClient only per architecture.md#Enforcement-Guidelines #4"
++"urllib.request".msg = "httpx.AsyncClient only per architecture.md#Enforcement-Guidelines #4"
++
++[tool.ruff.format]
++quote-style = "double"
++
++# mypy: AR-CQ3 strict mode
++[tool.mypy]
++strict = true
++python_version = "3.13"
++mypy_path = "packages/athena-core:packages/athena-feature-store:packages/athena-alpha-defense:packages/athena-ops-defense:packages/athena-orchestrator:packages/athena-execution"
++plugins = ["pydantic.mypy"]
++exclude = ["_bmad", "_bmad-output", "\\.venv", "build", "dist", "tests/"]
++
++# Generated _version.py has no type annotations beyond the simple ones we declare.
++[[tool.mypy.overrides]]
++module = "athena.core._version"
++ignore_missing_imports = true
++ignore_errors = true
++
++[tool.pydantic-mypy]
++init_forbid_extra = true
++init_typed = true
++warn_required_dynamic_aliases = true
+diff --git a/tests/integration/__init__.py b/tests/integration/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/integration/test_scaffold_imports.py b/tests/integration/test_scaffold_imports.py
+new file mode 100644
+index 0000000..d1c73ea
+--- /dev/null
++++ b/tests/integration/test_scaffold_imports.py
+@@ -0,0 +1,54 @@
++"""Story 1.1 Task 3.4 — integration smoke.
++
++Workspace, runtime deps, Python pin, uv discoverability.
++"""
++
++from __future__ import annotations
++
++import shutil
++import sys
++
++import pytest
++
++
++def test_python_version_is_3_13() -> None:
++    """architecture.md line 183: Python 3.13 only, no 3.12 fallback."""
++    assert sys.version_info[:2] == (3, 13), f"expected Python 3.13.x, got {sys.version_info}"
++
++
++def test_all_six_athena_packages_importable() -> None:
++    """AC-2: 6-package scaffold all importable as athena.<context> namespace."""
++    import athena.alpha_defense  # noqa: F401
++    import athena.core  # noqa: F401
++    import athena.execution  # noqa: F401
++    import athena.feature_store  # noqa: F401
++    import athena.ops_defense  # noqa: F401
++    import athena.orchestrator  # noqa: F401
++
++
++def test_runtime_deps_importable() -> None:
++    """AC-2: MVP Tier-1 runtime deps install successfully."""
++    import duckdb  # noqa: F401
++    import keyring  # noqa: F401
++    import polars  # noqa: F401
++    import pydantic  # noqa: F401
++    import pydantic_settings  # noqa: F401
++
++
++@pytest.mark.skipif(
++    sys.platform == "win32",
++    reason="uvloop is not available on Windows; orchestrator runs on WSL2/Linux",
++)
++def test_uvloop_importable_on_non_windows() -> None:
++    """uvloop only required on Trading PC (WSL2 Linux per architecture.md#D17)."""
++    import uvloop  # noqa: F401
++
++
++def test_python_kis_importable() -> None:
++    """python-kis (Soju06) is the broker primary adapter (architecture.md line 185)."""
++    import pykis  # noqa: F401  # python-kis exposes module as `pykis`
++
++
++def test_uv_discoverable_on_path() -> None:
++    """AC-2 implicit: `uv` must be on PATH so `uv sync` reproduces this state from a fresh clone."""
++    assert shutil.which("uv") is not None, "uv binary not discoverable on PATH"
+diff --git a/tests/regression/__init__.py b/tests/regression/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/regression/test_import_linter_contracts.py b/tests/regression/test_import_linter_contracts.py
+new file mode 100644
+index 0000000..309ad42
+--- /dev/null
++++ b/tests/regression/test_import_linter_contracts.py
+@@ -0,0 +1,114 @@
++"""Regression — verify .importlinter contracts ACTUALLY DETECT illegal imports.
++
++A passing baseline alone is insufficient: we must prove the contracts produce
++failures when violated. Each test injects an illegal import into a package's
++source tree, runs `lint-imports`, asserts the expected contract name appears in
++the failure output, then restores the source tree (try/finally guarantees cleanup).
++
++Story 1.1 AC-3 — "two negative regression tests assert deliberately added illegal
++imports get detected by lint-imports".
++"""
++
++from __future__ import annotations
++
++import shutil
++import subprocess
++import sys
++from collections.abc import Iterator
++from contextlib import contextmanager
++from pathlib import Path
++
++import pytest
++
++REPO_ROOT: Path = Path(__file__).resolve().parents[2]
++
++
++def _lint_imports_executable() -> str:
++    # Prefer venv-local script next to the active interpreter
++    venv_scripts = Path(sys.executable).parent
++    for candidate in (venv_scripts / "lint-imports.exe", venv_scripts / "lint-imports"):
++        if candidate.exists():
++            return str(candidate)
++    found = shutil.which("lint-imports")
++    if found is None:
++        pytest.skip("lint-imports console script not on PATH")
++    return found
++
++
++@contextmanager
++def _inject_illegal_import(package_dir: Path, illegal_line: str) -> Iterator[Path]:
++    """Drop a single .py file with the illegal import, yield its path, delete on exit."""
++    bad_file = package_dir / "_lint_regression_only.py"
++    if bad_file.exists():
++        pytest.fail(f"unexpected stale fixture file {bad_file} - prior test failed to clean up")
++    bad_file.write_text(
++        f"# DELETE ME - lint-imports regression fixture\n{illegal_line}\n", encoding="utf-8"
++    )
++    try:
++        yield bad_file
++    finally:
++        bad_file.unlink(missing_ok=True)
++
++
++def _run_lint_imports() -> subprocess.CompletedProcess[str]:
++    return subprocess.run(
++        [_lint_imports_executable()],
++        cwd=str(REPO_ROOT),
++        capture_output=True,
++        text=True,
++        timeout=60,
++    )
++
++
++def test_baseline_clean_scaffold_passes() -> None:
++    """Sanity: with no injection, lint-imports must pass."""
++    result = _run_lint_imports()
++    assert result.returncode == 0, (
++        f"baseline lint-imports failed (exit {result.returncode}):\n"
++        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
++    )
++
++
++@pytest.mark.parametrize(
++    "package_subdir,illegal_import,expected_contract_substring",
++    [
++        # Forbidden: execution -> orchestrator (AR-BND2)
++        (
++            "packages/athena-execution/athena/execution",
++            "import athena.orchestrator  # noqa",
++            "execution MUST NOT import orchestrator",
++        ),
++        # Forbidden: core -> any other athena.* (core is leaf)
++        (
++            "packages/athena-core/athena/core",
++            "import athena.feature_store  # noqa",
++            "athena.core is a leaf",
++        ),
++        # Forbidden: alpha_defense -> execution
++        (
++            "packages/athena-alpha-defense/athena/alpha_defense",
++            "import athena.execution  # noqa",
++            "alpha_defense MUST NOT import execution",
++        ),
++    ],
++    ids=["execution->orchestrator", "core->feature_store", "alpha->execution"],
++)
++def test_contract_detects_violation(
++    package_subdir: str,
++    illegal_import: str,
++    expected_contract_substring: str,
++) -> None:
++    package_dir = REPO_ROOT / package_subdir
++    assert package_dir.is_dir(), f"fixture target {package_dir} not found"
++
++    with _inject_illegal_import(package_dir, illegal_import):
++        result = _run_lint_imports()
++
++    assert result.returncode != 0, (
++        f"expected lint-imports to FAIL after injecting {illegal_import!r} "
++        f"into {package_subdir}, but it passed:\n{result.stdout}"
++    )
++    assert expected_contract_substring in result.stdout, (
++        f"expected contract '{expected_contract_substring}' in failure output, got:\n"
++        f"{result.stdout}"
++    )
+diff --git a/tests/regression/test_ruff_bans.py b/tests/regression/test_ruff_bans.py
+new file mode 100644
+index 0000000..19f9d0e
+--- /dev/null
++++ b/tests/regression/test_ruff_bans.py
+@@ -0,0 +1,79 @@
++"""Regression — verify ruff banned-api / DTZ rules ACTUALLY DETECT violations.
++
++Story 1.1 Task 7.6:
++- import pandas        -> TID253 with Enforcement #3 message
++- import requests      -> TID253 with Enforcement #4 message
++- urllib.request       -> TID253 with Enforcement #4 message
++- datetime.now()       -> DTZ005 (naive datetime forbidden, Enforcement #6)
++"""
++
++from __future__ import annotations
++
++import shutil
++import subprocess
++import sys
++from pathlib import Path
++
++import pytest
++
++REPO_ROOT: Path = Path(__file__).resolve().parents[2]
++
++
++def _ruff_executable() -> str:
++    venv_scripts = Path(sys.executable).parent
++    for candidate in (venv_scripts / "ruff.exe", venv_scripts / "ruff"):
++        if candidate.exists():
++            return str(candidate)
++    found = shutil.which("ruff")
++    if found is None:
++        pytest.skip("ruff console script not on PATH")
++    return found
++
++
++def _ruff_check(filepath: Path) -> tuple[int, str]:
++    """Run ruff with the repo's pyproject.toml config, target a single file."""
++    result = subprocess.run(
++        [
++            _ruff_executable(),
++            "check",
++            "--config",
++            str(REPO_ROOT / "pyproject.toml"),
++            "--no-cache",
++            str(filepath),
++        ],
++        capture_output=True,
++        text=True,
++        timeout=30,
++    )
++    return result.returncode, result.stdout + result.stderr
++
++
++@pytest.mark.parametrize(
++    "source,expected_code,expected_msg_substring",
++    [
++        ("import pandas\n", "TID", "Enforcement-Guidelines #3"),
++        ("import requests\n", "TID", "Enforcement-Guidelines #4"),
++        ("from urllib import request\n", "TID", "Enforcement-Guidelines #4"),
++        ("from datetime import datetime\nx = datetime.now()\n", "DTZ", ""),
++    ],
++    ids=["pandas-banned", "requests-banned", "urllib-request-banned", "naive-datetime-banned"],
++)
++def test_ruff_detects_violation(
++    tmp_path: Path,
++    source: str,
++    expected_code: str,
++    expected_msg_substring: str,
++) -> None:
++    bad_file = tmp_path / "bad_module.py"
++    bad_file.write_text(source, encoding="utf-8")
++
++    code, output = _ruff_check(bad_file)
++
++    assert code != 0, f"expected ruff to fail for source {source!r}, got exit 0:\n{output}"
++    assert expected_code in output, (
++        f"expected rule code containing {expected_code!r} in output:\n{output}"
++    )
++    if expected_msg_substring:
++        assert expected_msg_substring in output, (
++            f"expected message substring {expected_msg_substring!r} in output:\n{output}"
++        )

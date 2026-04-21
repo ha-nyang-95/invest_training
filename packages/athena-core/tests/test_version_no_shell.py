@@ -6,6 +6,13 @@ violates the principle of "런타임 shell 호출 overhead 0".
 
 This test inspects the AST (not raw source text) so that documentation
 mentioning these names — e.g. in docstrings — does not produce false positives.
+
+Defense-in-depth:
+1. Forbidden top-level imports (`import subprocess`, `import shutil`).
+2. Forbidden `from os import <callable>` aliases (closes `from os import system` bypass).
+3. Forbidden dotted calls (`subprocess.run`, `os.system`, ...).
+4. Forbidden bare-name calls (`system(...)`, `popen(...)`) that can be set up via
+   `from os import system` and would otherwise escape the dotted-call check.
 """
 
 from __future__ import annotations
@@ -16,6 +23,31 @@ from pathlib import Path
 VERSION_FILE: Path = Path(__file__).resolve().parent.parent / "athena" / "core" / "version.py"
 
 FORBIDDEN_TOPLEVEL_MODULES = frozenset({"subprocess", "shutil"})
+
+# `from os import <name>` for any of these attributes is treated as equivalent
+# to an `os.<name>` runtime call — it bypasses the dotted-call check otherwise.
+FORBIDDEN_FROM_OS = frozenset(
+    {
+        "system",
+        "popen",
+        "execv",
+        "execve",
+        "execl",
+        "execle",
+        "execlp",
+        "execlpe",
+        "execvp",
+        "execvpe",
+        "spawnl",
+        "spawnle",
+        "spawnlp",
+        "spawnlpe",
+        "spawnv",
+        "spawnve",
+        "spawnvp",
+        "spawnvpe",
+    }
+)
 
 FORBIDDEN_DOTTED_CALLS = frozenset(
     {
@@ -33,6 +65,33 @@ FORBIDDEN_DOTTED_CALLS = frozenset(
     }
 )
 
+# Bare-name call set (triggered by `from <module> import <name>; <name>(...)`).
+# "run" is excluded because it is too common a method name (pytest.run, app.run, ...)
+# and would produce false positives in legitimate code. The import check above
+# already prevents `from subprocess import run` because `subprocess` is forbidden.
+FORBIDDEN_BARE_CALLS = frozenset(
+    {
+        "system",
+        "popen",
+        "execv",
+        "execve",
+        "execl",
+        "execle",
+        "execlp",
+        "execlpe",
+        "execvp",
+        "execvpe",
+        "spawnl",
+        "spawnle",
+        "spawnlp",
+        "spawnlpe",
+        "spawnv",
+        "spawnve",
+        "spawnvp",
+        "spawnvpe",
+    }
+)
+
 
 def _collect_imports(tree: ast.AST) -> list[str]:
     found: list[str] = []
@@ -46,6 +105,15 @@ def _collect_imports(tree: ast.AST) -> list[str]:
     return found
 
 
+def _collect_os_from_aliases(tree: ast.AST) -> list[str]:
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "os":
+            for alias in node.names:
+                found.append(alias.name)
+    return found
+
+
 def _collect_dotted_calls(tree: ast.AST) -> list[str]:
     """Walk ast.Call nodes; report `<Name>.<attr>` patterns (e.g. subprocess.run, os.popen)."""
     found: list[str] = []
@@ -54,6 +122,15 @@ def _collect_dotted_calls(tree: ast.AST) -> list[str]:
             attr = node.func
             if isinstance(attr.value, ast.Name):
                 found.append(f"{attr.value.id}.{attr.attr}")
+    return found
+
+
+def _collect_bare_name_calls(tree: ast.AST) -> list[str]:
+    """Walk ast.Call nodes; report bare `<Name>(...)` callee identifiers."""
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            found.append(node.func.id)
     return found
 
 
@@ -71,6 +148,16 @@ def test_version_module_has_no_forbidden_imports() -> None:
     )
 
 
+def test_version_module_has_no_forbidden_from_os_aliases() -> None:
+    tree = ast.parse(VERSION_FILE.read_text(encoding="utf-8"))
+    aliases = _collect_os_from_aliases(tree)
+    violations = [a for a in aliases if a in FORBIDDEN_FROM_OS]
+    assert not violations, (
+        f"athena.core.version uses `from os import {violations}`; these aliases are "
+        f"equivalent to runtime shell calls and bypass the dotted-call check."
+    )
+
+
 def test_version_module_has_no_forbidden_calls() -> None:
     tree = ast.parse(VERSION_FILE.read_text(encoding="utf-8"))
     calls = _collect_dotted_calls(tree)
@@ -78,4 +165,15 @@ def test_version_module_has_no_forbidden_calls() -> None:
     assert not violations, (
         f"athena.core.version contains forbidden call patterns {violations}; "
         f"per AR-COM4, runtime shell invocation is banned."
+    )
+
+
+def test_version_module_has_no_forbidden_bare_calls() -> None:
+    tree = ast.parse(VERSION_FILE.read_text(encoding="utf-8"))
+    bare = _collect_bare_name_calls(tree)
+    violations = [name for name in bare if name in FORBIDDEN_BARE_CALLS]
+    assert not violations, (
+        f"athena.core.version contains bare-name calls {violations} that match "
+        f"forbidden shell callables; adversarial `from os import system; system(...)` "
+        f"bypass is blocked here."
     )

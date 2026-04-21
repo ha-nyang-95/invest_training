@@ -27,10 +27,26 @@ def test_error_code_members_match_architecture_d14() -> None:
     assert actual == EXPECTED_MEMBERS
 
 
-def test_error_code_values_are_strings_matching_names() -> None:
+# architecture.md#D14: `KIS_RATE_LIMIT` carries the KIS gateway error code `EGW00201`
+# (broker's own wire value); the remaining 7 members use their symbolic name as value.
+EXPECTED_VALUES = {
+    "KIS_RATE_LIMIT": "EGW00201",
+    "FEATURE_MISSING": "FEATURE_MISSING",
+    "LLM_TIMEOUT": "LLM_TIMEOUT",
+    "CONFIDENCE_BELOW_THRESHOLD": "CONFIDENCE_BELOW_THRESHOLD",
+    "DATA_STALE": "DATA_STALE",
+    "HEARTBEAT_LOST": "HEARTBEAT_LOST",
+    "SLIPPAGE_EXCEEDED": "SLIPPAGE_EXCEEDED",
+    "POLICY_NOT_COOLED": "POLICY_NOT_COOLED",
+}
+
+
+def test_error_code_values_match_architecture_d14() -> None:
     for member in ErrorCode:
         assert isinstance(member.value, str)
-        assert member.value == member.name
+        assert member.value == EXPECTED_VALUES[member.name], (
+            f"{member.name} value drift from architecture.md#D14"
+        )
 
 
 def test_athena_error_hierarchy() -> None:

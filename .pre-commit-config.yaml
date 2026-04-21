@@ -35,7 +35,14 @@ repos:
           - pydantic>=2,<3
           - pydantic-settings>=2,<3
 
-  # AR-SEC1 placeholder + NFR-S1: never commit secrets/keys.
+  # AR-SEC1 + NFR-S1: never commit secrets/keys. detect-private-key catches PEM
+  # headers only; gitleaks scans for API tokens / high-entropy strings / broker
+  # creds. Story 1.1 Task 7.3 requires both.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
