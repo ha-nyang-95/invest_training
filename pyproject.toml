@@ -56,6 +56,11 @@ select = ["E", "F", "I", "N", "UP", "B", "S", "TID", "DTZ"]
 "tests/**/*.py" = ["S101", "S404", "S603", "S607"]
 # Build hook intentionally invokes git via subprocess (sanctioned by AR-COM4).
 "packages/*/hatch_build.py" = ["S404", "S603", "S607"]
+# SecretName(StrEnum) values are keychain LOOKUP IDs, not real secrets — S105
+# (hardcoded password heuristic) is a definitional false positive for this
+# registry. The actual secrets live in the OS Keychain and are fetched via
+# `athena.core.keyring_client.get_secret` at runtime.
+"packages/athena-core/athena/core/keyring_client.py" = ["S105"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "pandas".msg = "Polars only per architecture.md#Enforcement-Guidelines #3"
@@ -70,6 +75,13 @@ quote-style = "double"
 strict = true
 python_version = "3.13"
 mypy_path = "packages/athena-core:packages/athena-feature-store:packages/athena-alpha-defense:packages/athena-ops-defense:packages/athena-orchestrator:packages/athena-execution"
+# explicit_package_bases: required because `packages/<pkg>/athena/` is a PEP-420
+# namespace directory (no `__init__.py`). Without this, single-file mypy runs
+# (e.g. pre-commit on a single staged file) report
+# "Source file found twice under different module names" because mypy auto-walks
+# up the directory tree and resolves `packages/<pkg>/athena/<mod>/__init__.py`
+# as just `<mod>` while mypy_path resolves it as `athena.<mod>`.
+explicit_package_bases = true
 plugins = ["pydantic.mypy"]
 exclude = ["^_bmad/", "^_bmad-output/", "^\\.venv/", "^build/", "^dist/", "(^|/)tests/"]
 
