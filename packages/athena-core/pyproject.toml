@@ -24,4 +24,3 @@ only-include = ["athena/core"]
 # (git describe + ISO 8601 UTC). Runtime subprocess calls are banned (AR-COM4).
 [tool.hatch.build.hooks.custom]
 path = "hatch_build.py"
-

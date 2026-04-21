@@ -13,25 +13,25 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-VERSION_FILE: Path = (
-    Path(__file__).resolve().parent.parent / "athena" / "core" / "version.py"
-)
+VERSION_FILE: Path = Path(__file__).resolve().parent.parent / "athena" / "core" / "version.py"
 
 FORBIDDEN_TOPLEVEL_MODULES = frozenset({"subprocess", "shutil"})
 
-FORBIDDEN_DOTTED_CALLS = frozenset({
-    "subprocess.run",
-    "subprocess.Popen",
-    "subprocess.call",
-    "subprocess.check_call",
-    "subprocess.check_output",
-    "os.popen",
-    "os.system",
-    "os.execv",
-    "os.execve",
-    "os.spawnl",
-    "os.spawnv",
-})
+FORBIDDEN_DOTTED_CALLS = frozenset(
+    {
+        "subprocess.run",
+        "subprocess.Popen",
+        "subprocess.call",
+        "subprocess.check_call",
+        "subprocess.check_output",
+        "os.popen",
+        "os.system",
+        "os.execv",
+        "os.execve",
+        "os.spawnl",
+        "os.spawnv",
+    }
+)
 
 
 def _collect_imports(tree: ast.AST) -> list[str]:

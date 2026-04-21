@@ -6,9 +6,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
-
 from athena.core.dto import BaseDTO
+from pydantic import ValidationError
 
 
 def _valid(**overrides: Any) -> dict[str, Any]:
@@ -47,7 +46,7 @@ def test_accepts_dirty_suffix() -> None:
 
 def test_rejects_naive_datetime() -> None:
     with pytest.raises(ValidationError, match="timezone-aware"):
-        BaseDTO(**_valid(timestamp=datetime(2026, 4, 21, 12, 0, 0)))
+        BaseDTO(**_valid(timestamp=datetime(2026, 4, 21, 12, 0, 0)))  # noqa: DTZ001
 
 
 def test_rejects_malformed_module_version() -> None:

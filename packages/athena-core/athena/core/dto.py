@@ -17,8 +17,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# Pydantic 2 uses Rust regex engine for Field(pattern=...). The two patterns below
-# stay deliberately simple (anchors + alternation) to remain Rust-regex-compatible.
+# Pydantic 2 uses Rust regex engine for Field(pattern=...). The patterns below
+# stay deliberately simple (anchors + alternation) to remain Rust-compatible.
 _MODULE_VERSION_PATTERN = r"^M\d+\.v\d+\.\d+\.\d+$|^[a-z_-]+\.v\d+\.\d+\.\d+$"
 _POLICY_SHA_PATTERN = r"^[0-9a-f]{7,40}(-dirty)?$"
 

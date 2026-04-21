@@ -1,0 +1,47 @@
+# Story 1.1 Task 7 — pre-commit hook chain enforcing AR-CQ1..5 + architecture bans.
+# Run order matters: ruff fixes auto-fixable issues first, then mypy/scanners verify.
+
+default_language_version:
+  python: python3.13
+
+# Skip generated/external files everywhere.
+exclude: |
+  (?x)^(
+    \.venv/.*|
+    _bmad/.*|
+    _bmad-output/.*|
+    .*/_version\.py|
+    build/.*|
+    dist/.*
+  )$
+
+repos:
+  # AR-CQ1: ruff lint + format (architecture bans live in [tool.ruff] of pyproject.toml)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.11
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # AR-CQ3: mypy strict on packages only (tests excluded by [tool.mypy].exclude in pyproject.toml)
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.20.1
+    hooks:
+      - id: mypy
+        args: [--strict]
+        files: ^packages/[^/]+/athena/[^/]+/.*\.py$
+        additional_dependencies:
+          - pydantic>=2,<3
+          - pydantic-settings>=2,<3
+
+  # AR-SEC1 placeholder + NFR-S1: never commit secrets/keys.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: detect-private-key
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace

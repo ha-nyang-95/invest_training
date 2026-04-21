@@ -4,16 +4,18 @@ from __future__ import annotations
 
 from athena.core.errors import AthenaError, ErrorCode, MissingSecretError
 
-EXPECTED_MEMBERS = frozenset({
-    "KIS_RATE_LIMIT",
-    "FEATURE_MISSING",
-    "LLM_TIMEOUT",
-    "CONFIDENCE_BELOW_THRESHOLD",
-    "DATA_STALE",
-    "HEARTBEAT_LOST",
-    "SLIPPAGE_EXCEEDED",
-    "POLICY_NOT_COOLED",
-})
+EXPECTED_MEMBERS = frozenset(
+    {
+        "KIS_RATE_LIMIT",
+        "FEATURE_MISSING",
+        "LLM_TIMEOUT",
+        "CONFIDENCE_BELOW_THRESHOLD",
+        "DATA_STALE",
+        "HEARTBEAT_LOST",
+        "SLIPPAGE_EXCEEDED",
+        "POLICY_NOT_COOLED",
+    }
+)
 
 
 def test_error_code_has_exactly_eight_members() -> None:

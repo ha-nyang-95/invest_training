@@ -34,7 +34,8 @@ def built_wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
         timeout=300,
     )
     assert result.returncode == 0, (
-        f"uv build failed (exit {result.returncode}):\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        f"uv build failed (exit {result.returncode}):\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
 
     wheels = sorted(out_dir.glob("athena_core-*.whl"))

@@ -1,4 +1,7 @@
-"""Story 1.1 Task 3.4 — integration smoke: workspace, runtime deps, Python pin, uv discoverability."""
+"""Story 1.1 Task 3.4 — integration smoke.
+
+Workspace, runtime deps, Python pin, uv discoverability.
+"""
 
 from __future__ import annotations
 
@@ -32,7 +35,10 @@ def test_runtime_deps_importable() -> None:
     import pydantic_settings  # noqa: F401
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="uvloop is not available on Windows; orchestrator runs on WSL2/Linux")
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="uvloop is not available on Windows; orchestrator runs on WSL2/Linux",
+)
 def test_uvloop_importable_on_non_windows() -> None:
     """uvloop only required on Trading PC (WSL2 Linux per architecture.md#D17)."""
     import uvloop  # noqa: F401

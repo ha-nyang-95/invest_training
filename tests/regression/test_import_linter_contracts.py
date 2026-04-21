@@ -41,7 +41,9 @@ def _inject_illegal_import(package_dir: Path, illegal_line: str) -> Iterator[Pat
     bad_file = package_dir / "_lint_regression_only.py"
     if bad_file.exists():
         pytest.fail(f"unexpected stale fixture file {bad_file} - prior test failed to clean up")
-    bad_file.write_text(f"# DELETE ME - lint-imports regression fixture\n{illegal_line}\n", encoding="utf-8")
+    bad_file.write_text(
+        f"# DELETE ME - lint-imports regression fixture\n{illegal_line}\n", encoding="utf-8"
+    )
     try:
         yield bad_file
     finally:
