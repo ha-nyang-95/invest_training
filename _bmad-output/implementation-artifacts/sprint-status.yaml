@@ -1,5 +1,5 @@
 # generated: 2026-04-21
-# last_updated: 2026-04-21  # Story 1.1 in-progress
+# last_updated: 2026-04-21  # Story 1.1 review (handed off)
 # project: invest_training
 # project_key: NOKEY
 # tracking_system: file-system
@@ -44,7 +44,7 @@ story_location: _bmad-output/implementation-artifacts
 development_status:
   # Epic 1: Foundation & Market Truth Capture
   epic-1: in-progress
-  1-1-프로젝트-bootstrap-uv-monorepo-scaffold: in-progress
+  1-1-프로젝트-bootstrap-uv-monorepo-scaffold: review
   1-2-환경-secrets-infrastructure-wsl2-os-keychain-ssh-signing: backlog
   1-3-self-hosted-ci-cd-pipeline-7단계-gate: backlog
   1-4-duckdb-parquet-shard-rsync-data-pipeline: backlog

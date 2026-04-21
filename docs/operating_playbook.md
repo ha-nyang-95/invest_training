@@ -42,6 +42,41 @@ $ uv run pytest tests/ packages/ -q
 **Skipped:** `test_uvloop_importable_on_non_windows` — `uvloop` is Linux/macOS only;
 the orchestrator process runs on WSL2 Ubuntu (D17), so Windows dev hosts skip this check.
 
+### Story 1.1 Task 9.1 — Final 5-Gate Verification (2026-04-21)
+
+```
+$ uv sync --frozen --group dev
+Checked 64 packages in 3ms
+
+$ uv run pytest -n auto
+16 workers [41 items]
+40 passed, 1 skipped in 1.93s
+
+$ uv run pre-commit run --all-files
+ruff (legacy alias) ........ Passed
+ruff format ................ Passed
+mypy ....................... Passed
+detect private key ......... Passed
+check yaml ................. Passed
+check toml ................. Passed
+check for merge conflicts .. Passed
+fix end of files ........... Passed
+trim trailing whitespace ... Passed
+
+$ uv run lint-imports
+Athena layer order (one-way only) KEPT
+athena.core is a leaf (no athena.* deps) KEPT
+execution MUST NOT import orchestrator (DTO interface only - AR-BND2) KEPT
+alpha_defense MUST NOT import execution KEPT
+ops_defense MUST NOT import execution KEPT
+Contracts: 5 kept, 0 broken.
+
+$ uv build --package athena-core --wheel --out-dir <tmp>
+Successfully built athena_core-0.1.0-py3-none-any.whl
+```
+
+All 5 gates passed. Story 1.1 ready for review handoff.
+
 **Tier-1 dependency snapshot (frozen by uv.lock):**
 
 | Package | Resolved version |

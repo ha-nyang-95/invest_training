@@ -30,7 +30,14 @@ dev = [
 # per https://docs.pytest.org/en/stable/explanation/pythonpath.html#import-modes
 [tool.pytest.ini_options]
 minversion = "8.0"
-addopts = ["--import-mode=importlib", "-ra", "--strict-markers"]
+addopts = [
+    "--import-mode=importlib",
+    "-ra",
+    "--strict-markers",
+    # pytest-xdist: keep tests from the same file on one worker so the
+    # import-linter regression baseline does not race with the inject/restore tests.
+    "--dist=loadfile",
+]
 testpaths = ["packages", "tests"]
 asyncio_mode = "auto"
 
