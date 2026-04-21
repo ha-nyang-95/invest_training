@@ -126,3 +126,150 @@ global `git config` are intentionally unset. SSH commit signing infrastructure i
 **Story 1.2** (`1-2-환경-secrets-infrastructure-wsl2-os-keychain-ssh-signing`). Until then,
 commits are unsigned but author-attributed to `장철환 <wkdcjfghks1@gmail.com>` (matching the
 initial commit `17b61cf`).
+
+**Story 1.2 update (2026-04-21):** global `git config --global user.name/email` set to
+`chulhwan` / `wkdcjfghks1@gmail.com` before Task 2 commit. Unsigned commits `2f95bb6`,
+`35ac260`, `a755d48`, `0558d3e`, `05a26da` carry this author. SSH signing is activated by
+Task 5 (WSL2 side) — first **signed** commit will be the Task 5.4 empty verification commit,
+and the Task 7.4 handoff commit is the second signed commit.
+
+---
+
+## Story 1.2 — Environment & Secrets Infrastructure
+
+Source story: `_bmad-output/implementation-artifacts/1-2-환경-secrets-infrastructure-wsl2-os-keychain-ssh-signing.md`.
+
+### Secret Bootstrap — one-time keyring enrollment
+
+The 14 `SecretName` IDs are fixed in `packages/athena-core/athena/core/keyring_client.py`
+(`SecretName(StrEnum)` — 5 KIS order/query keys + DART + 2 LLM + 2 notification +
+3 S3 + LUKS). Enrolling them is a one-time per-host step.
+
+**Recommended (production) — OS-native UI, value never touches shell history:**
+
+*Windows (wincred backend):*
+Open "자격 증명 관리자" (Credential Manager) → Windows 자격 증명 → 일반 자격 증명 추가. Set:
+- 인터넷/네트워크 주소: `athena`
+- 사용자 이름: `<SECRET_NAME>` (e.g. `KIS_ORDER_APP_KEY`)
+- 암호: `<actual secret value>`
+
+Or via CLI (value still shows in process list momentarily):
+```powershell
+cmdkey /generic:athena /user:KIS_ORDER_APP_KEY /pass:<value>
+```
+
+*Linux/WSL2 (Secret Service / libsecret backend):*
+```bash
+echo -n '<value>' | secret-tool store \
+    --label='Athena KIS_ORDER_APP_KEY' \
+    service athena \
+    username KIS_ORDER_APP_KEY
+```
+
+**Dev-bootstrap (NOT for production) — Python one-liner:**
+
+```bash
+uv run python -c "from athena.core.keyring_client import set_secret, SecretName; \
+    set_secret(SecretName.KIS_ORDER_APP_KEY, '<value>')"
+```
+
+⚠ **Warning:** the value appears in PowerShell/bash history. Use only for throwaway test
+values. For real API keys, use the OS-native UI path above.
+
+**Verifying enrollment:**
+
+```python
+from athena.core.keyring_client import get_secret, SecretName
+print(get_secret(SecretName.KIS_ORDER_APP_KEY))   # raises MissingSecretError if absent
+```
+
+### Story 1.2 Task 1 — WSL2 setup
+
+> **To be filled by Khuk0** after running the Task 1 command block in the story file's
+> "Khuk0 Handoff — Manual Steps" section. Paste outputs of:
+>
+> - `wsl -l -v` (from Windows PowerShell)
+> - `cat /etc/os-release` (from WSL2)
+> - `systemctl --user status` first ~15 lines (from WSL2)
+> - `ps -p 1 -o comm=` (from WSL2; MUST show `systemd`)
+
+```
+<!-- TODO: Khuk0 paste raw output here -->
+```
+
+### Story 1.2 Task 5 — SSH signing setup
+
+> **To be filled by Khuk0** after running Task 5. Paste outputs of:
+>
+> - `git log --show-signature -1` for the Task 5.4 verification commit
+> - `git verify-commit HEAD` exit code
+> - `ssh-keygen -lf ~/.ssh/id_ed25519_athena_sign.pub` (fingerprint line only; do NOT paste the full public key body)
+
+```
+<!-- TODO: Khuk0 paste raw output here -->
+```
+
+### Story 1.2 Task 6 — Logger PC ↔ Trading PC SSH trust
+
+> **To be filled by Khuk0** after running Task 6. Paste outputs of:
+>
+> - Windows: `Get-NetFirewallRule -Name sshd-local-subnet | Format-List DisplayName,Enabled,Profile,Action`
+> - Windows: `Get-NetFirewallRule -Name sshd-local-subnet | Get-NetFirewallAddressFilter | Format-List RemoteAddress`
+> - WSL2: `ssh logger-pc "echo ok"` (must print `ok`, exit 0, no password prompt)
+> - WSL2: `ssh-keygen -lf ~/.ssh/known_hosts` fingerprint line for `logger-pc`
+> - PowerShell: `Test-NetConnection -ComputerName <public_ip> -Port 22` output (must be `TcpTestSucceeded: False`)
+
+```
+<!-- TODO: Khuk0 paste raw output here -->
+```
+
+**IP note:** `HostName` in `~/.ssh/config → Host logger-pc` is the default gateway from
+WSL2's perspective (`ip route show | awk '/^default/ {print $3}'`). On WSL2 reboot this
+value can change — re-check with the same command and update `~/.ssh/config` if needed.
+Alternative (not adopted here): `[experimental] networkingMode=mirrored` in `/etc/wsl.conf`
+makes the IP stable at the cost of NAT-mode isolation.
+
+### Story 1.2 Task 7.2 — 5-gate pre-handoff verification (captured 2026-04-21)
+
+Captured by dev agent before Task 1/5/6 manual work — confirms the code-only portion
+of Story 1.2 (Tasks 2, 3, 4) is release-ready. Re-run with identical commands immediately
+before the Task 7.4 handoff commit once Tasks 1/5/6 are complete.
+
+```
+$ uv sync --frozen --group dev
+Audited 64 packages in 4ms
+
+$ uv run pytest -n auto
+======================= 111 passed, 2 skipped in 2.00s =======================
+
+$ uv run pre-commit run --all-files
+ruff (legacy alias) ........ Passed
+ruff format ................ Passed
+mypy ....................... Passed
+Detect hardcoded secrets ... Passed
+detect private key ......... Passed
+check yaml ................. Passed
+check toml ................. Passed
+check for merge conflicts .. Passed
+fix end of files ........... Passed
+trim trailing whitespace ... Passed
+
+$ uv run lint-imports
+Analyzed 13 files, 3 dependencies.
+Athena layer order (one-way only) KEPT
+athena.core is a leaf (no athena.* deps) KEPT
+execution MUST NOT import orchestrator (DTO interface only - AR-BND2) KEPT
+alpha_defense MUST NOT import execution KEPT
+ops_defense MUST NOT import execution KEPT
+Contracts: 5 kept, 0 broken.
+
+$ uv build --package athena-core --wheel --out-dir /tmp/athena-1-2-check
+Successfully built athena_core-0.1.0-py3-none-any.whl
+```
+
+**Test suite delta from Story 1.1 close (72 passing / 2 skipped):** +39 new tests
+across `test_keyring_client.py` (10), `test_keyring_client_no_shell.py` (5),
+`test_settings.py` (22), `test_no_dotenv_files.py` (2). `.env` guard has 5 parametrize
+cases that are counted individually in the +39. The story's original Task 7.3 estimate
+was "+19 min / +25 max" — actual count exceeded the max because of the parametrize
+expansion and additional accessor-coverage / literal-rejection / missing-error tests.
