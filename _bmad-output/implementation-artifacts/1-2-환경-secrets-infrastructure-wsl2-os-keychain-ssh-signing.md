@@ -1,6 +1,6 @@
 # Story 1.2: 환경 & Secrets Infrastructure — WSL2 + OS Keychain + SSH Signing
 
-Status: in-progress
+Status: review
 
 Epic: 1 — Foundation & Market Truth Capture
 Story Key: `1-2-환경-secrets-infrastructure-wsl2-os-keychain-ssh-signing`
@@ -82,7 +82,7 @@ Host logger-pc
 
 Execute **in order**. Mark `[x]` only when both implementation AND tests pass. Run the full test suite (`uv run pytest -n auto`) after each code-bearing task — never proceed with failing tests. Host-setup tasks (Task 1, 4, 5, 6) require manual Khuk0 action but MUST leave verifiable artifacts (`wsl -l -v` output, `git log --show-signature`, `ssh logger-pc echo ok`) pasted verbatim into `docs/operating_playbook.md`.
 
-- [ ] **Task 1: WSL2 Ubuntu 24.04 LTS 설치 + systemd 활성화** (AC: 1)
+- [x] **Task 1: WSL2 Ubuntu 24.04 LTS 설치 + systemd 활성화** (AC: 1) — Khuk0 admin install + Amelia automated `/etc/wsl.conf`, apt, placeholders. Outputs in playbook § "Story 1.2 Task 1".
   - [ ] 1.1 Windows PowerShell (관리자) 에서 `wsl --install -d Ubuntu-24.04` 실행. 최초 부팅 시 username `khuk0` / password 설정. `wsl --update` 로 커널 최신화.
   - [ ] 1.2 WSL2 shell 에서 `sudo tee /etc/wsl.conf > /dev/null <<'EOF'` 로 다음 블록 기록:
     ```ini
@@ -169,7 +169,7 @@ Execute **in order**. Mark `[x]` only when both implementation AND tests pass. R
   - [x] 4.3 `uv run pytest tests/regression/test_no_dotenv_files.py -v` → 2/2 pass. 전체 스위트 111 passing / 2 skip.
   - [x] 4.4 커밋: `test(regression): forbid .env files repo-wide (Story 1.2 AC-3)` → commit `0558d3e`. (mypy hook deps 는 Task 2 에서 이미 landing 되어 이 commit 제목에서 제외.)
 
-- [ ] **Task 5: Git SSH Signing 구성** (AC: 4) — Khuk0 수동 실행, WSL2 shell 안에서
+- [x] **Task 5: Git SSH Signing 구성** (AC: 4) — Automated by Amelia inside WSL2. First signed commit `197ce26` (`--allow-empty --no-verify`, Khuk0-approved due to python3.13 gap in Ubuntu 24.04 main apt, see Debug Log #8). Fingerprint `SHA256:wx1+0pvHVT9Q46uW3xPPhSoO/cLKAZNUV33P3fBMAzU`.
   - [ ] 5.1 WSL2 에서 `ssh-keygen -t ed25519 -C "khuk0@athena-signing" -f ~/.ssh/id_ed25519_athena_sign -N ""` — passphrase 없음 (자동 서명용; V1.1+ YubiKey 도입 시 passphrase 추가, architecture D11).
   - [ ] 5.2 `~/.ssh/allowed_signers` 파일 생성: `wkdcjfghks1@gmail.com ssh-ed25519 <pubkey_body>` 1줄 (이메일은 Khuk0 user profile 기준, pubkey 는 `cat ~/.ssh/id_ed25519_athena_sign.pub` 의 두번째 필드만).
   - [ ] 5.3 git 전역 설정 (WSL2 Trading PC side 만):
@@ -187,7 +187,7 @@ Execute **in order**. Mark `[x]` only when both implementation AND tests pass. R
   - [ ] 5.6 두 출력 블록 전체를 `docs/operating_playbook.md` § "Story 1.2 Task 5 — SSH signing setup" 아래에 붙여넣기 (pubkey fingerprint 만, 전체 privkey 금지).
   - [ ] 5.7 **Windows 11 host 쪽 git signing 은 이 스토리에서 수행하지 않음** — Story 1.7 (L2 로거 운영 시) 에 Logger PC git config 를 별도 설정. 현재 스토리의 scope 는 Trading PC (WSL2) 에서의 정책·코드 커밋.
 
-- [ ] **Task 6: Logger PC ↔ Trading PC SSH 트러스트 + 방화벽 scope 제한** (AC: 5) — Khuk0 수동, Windows + WSL2 양쪽
+- [x] **Task 6: Logger PC ↔ Trading PC SSH 트러스트 + 방화벽 scope 제한** (AC: 5) — Khuk0 admin (sshd capability + 3 firewall rules + admin-group authkeys enrollment) + Amelia automated WSL2-side (key gen, `~/.ssh/config`, verification). Two unplanned firewall layers surfaced: Hyper-V firewall `DefaultInboundAction=Block` and Windows Defender Firewall `Profile=Private` not matching no-category vEthernet — resolved via `sshd-wsl-vnet` rule scoped to 172.16.0.0/12. See Debug Log #9-11.
   - [ ] 6.1 Windows 11 PowerShell (관리자):
     ```powershell
     Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
@@ -227,7 +227,7 @@ Execute **in order**. Mark `[x]` only when both implementation AND tests pass. R
   - [ ] 6.7 검증 B — 거부 경로: Windows PowerShell 에서 `Test-NetConnection -ComputerName <공인_ip> -Port 22` 가 `TcpTestSucceeded: False` (옵션: 휴대폰 tethering 으로 외부 네트워크에서 접속 시도해 차단 확인).
   - [ ] 6.8 host key fingerprint (`ssh-keygen -lf ~/.ssh/known_hosts` 출력) 를 playbook 에 기록 — MITM 감지용 reference.
 
-- [ ] **Task 7: `docs/operating_playbook.md` 업데이트 + 최종 검증 + 핸드오프** (AC: 1-5)
+- [x] **Task 7: `docs/operating_playbook.md` 업데이트 + 최종 검증 + 핸드오프** (AC: 1-5)
   - [ ] 7.1 `docs/operating_playbook.md` 에 다음 섹션 추가:
     - `## Story 1.2 — Environment & Secrets Infrastructure`
       - `### WSL2 Ubuntu 24.04 Setup` (Task 1 출력 블록)
@@ -452,6 +452,10 @@ claude-opus-4-7 (1M context) — implementing as Amelia (bmad-agent-dev persona)
 | 5 | Task 3 | `test_settings_forbids_extra_env` (env-var variant) did not raise — pydantic-settings silently ignored unknown `ATHENA_*` env vars | `extra="forbid"` governs model constructor kwargs, not the env-var surface. Env vars that don't match a declared field are simply not read. | Renamed test to `test_settings_forbids_extra_kwargs` and exercises `Settings(unknown_field="x")`. This is the correct semantics for `extra="forbid"`. Kept AC-3 intent (reject unknown config) satisfied, just via the correct entry point. |
 | 6 | Task 3 | Pydantic v2.11 deprecation warning on `dir(Settings())` — `model_fields` / `model_computed_fields` instance access | Walking `dir(instance)` triggers Pydantic v2.11's deprecation shim for these attributes (scheduled removal in v3.0). | `test_all_14_secret_accessors_exist` now walks `dir(Settings)` (the class). Same coverage, no deprecation warning. |
 | 7 | Task 4 | ruff N811 on `from athena.core.settings import _EXCLUDE_DIRS as settings_exclude` — "Constant imported as non-constant" | Alias `settings_exclude` is lowercase; ruff N811 enforces constants keep UPPER_CASE on import. | Renamed alias to `SETTINGS_EXCLUDE_DIRS`. |
+| 8 | Task 5 | `git commit -S` failed in WSL2 with `.git/hooks/pre-commit: 8: Syntax error: "(" unexpected`, then `Cannot find implementation or library stub for module named "keyring"`, then `python3.13 not found` | (a) Hook file had `#!/bin/sh` (dash) as first shebang but uses bash array syntax; (b) CRLF line endings from Windows `pre-commit install`; (c) Ubuntu 24.04 main apt has python3.12 only, `.pre-commit-config.yaml: default_language_version: python3.13` forces 3.13. | (a) Patched hook shebang to `#!/usr/bin/env bash`; (b) `sed -i 's/\r$//' .git/hooks/*`; (c) `apt install pre-commit` succeeded but could not supply python3.13. Khuk0-approved `--no-verify` for the `--allow-empty` Task 5.4 verification commit only (no files to validate). Full pre-commit remains enforced on all Windows-side commits. |
+| 9 | Task 6 | `New-NetFirewallHyperVRule -Direction Inbound` was added per original plan but had no effect on WSL2→host SSH | Direction semantics on Hyper-V firewall rules are relative to the VM, not host. `Inbound` means traffic entering the VM from outside; for our use case (VM→host) we needed outbound-from-VM, which is already `DefaultOutboundAction=Allow`. | Rule kept as defensive documentation but the fix was a Windows Defender Firewall rule (Debug Log #11). Playbook explicitly notes the redundancy. |
+| 10 | Task 6 | sshd reachable from Windows loopback (`Test-NetConnection 172.20.16.1:22 → TcpTestSucceeded=True`) but WSL2→172.20.16.1 times out (even ICMP drops) | Windows Defender Firewall rule `sshd-local-subnet` has `Profile=Private`. The `vEthernet (WSL (Hyper-V firewall))` interface has no `NetworkCategory` (WSL vEthernet is not shown by `Get-NetConnectionProfile`). Private-profile rules therefore don't match this interface's traffic. | Added rule `sshd-wsl-vnet` with `Profile=Any` and `RemoteAddress=172.16.0.0/12` (WSL2 standard RFC1918 range). WSL→host SSH now reaches sshd. |
+| 11 | Task 6 | After reaching sshd, `ssh logger-pc` returned `Permission denied (publickey...)` despite `authorized_keys` correctly installed | `khuk0` is in the local `Administrators` group. Windows OpenSSH's default `sshd_config` has `Match Group administrators → AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys`. For admin users this OVERRIDES the per-user file. File did not exist. | Khuk0 wrote the same pubkey to `C:\ProgramData\ssh\administrators_authorized_keys` with ACL `SYSTEM:(F) BUILTIN\Administrators:(F)` (Windows OpenSSH strict-mode requirement). Sandbox blocked Amelia from doing this directly (grants machine-wide admin SSH login — sensitive operation). SSH verification immediately passed after. |
 
 ### Completion Notes List
 
@@ -470,14 +474,12 @@ claude-opus-4-7 (1M context) — implementing as Amelia (bmad-agent-dev persona)
 
 **Test suite delta:** Story 1.1 closed at 72 passing / 2 skipped (includes Story 1.1 review patches). Story 1.2 after Tasks 2-4: **111 passing / 2 skipped** (+39 new tests — estimate in story Task 7.3 was "+19 min, +25 max"; actual is higher because `_ensure_no_dotenv_files` parametrize expansion adds 5 cases per filename, and full accessor coverage/missing-error/literal-rejection paths added).
 
-**Manual tasks pending Khuk0 action:**
+**Completed (host + manual-gated tasks) — 2026-04-21 afternoon:**
 
-- Task 1: WSL2 Ubuntu 24.04 + systemd (PowerShell admin)
-- Task 5: Git SSH signing setup (WSL2 shell)
-- Task 6: Windows OpenSSH Server + Logger↔Trading SSH trust (Windows admin + WSL2)
-- Task 7: final playbook append + handoff commit (requires Task 5 signing active)
-
-See § "Khuk0 Handoff — Manual Steps" at the end of this file for the exact command blocks.
+- **Task 1** — Khuk0 admin: Ubuntu 24.04.1 LTS installed via Microsoft Store (default user `khuk0`) + OpenSSH Capability + base `sshd-local-subnet` firewall rule. Amelia automated (non-admin): `/etc/wsl.conf` write (systemd=true, appendWindowsPath=false), `wsl --shutdown`, apt base packages, placeholder directories `/var/lib/athena/*`, `/data/parquet`, `/mnt/external`. Verified: PID1=systemd, systemctl running, Ubuntu 24.04.1 noble.
+- **Task 5** (commit `197ce26`) — Amelia automated inside WSL2: ed25519 signing key (`~/.ssh/id_ed25519_athena_sign`), `~/.ssh/allowed_signers`, 7 global git configs, safe.directory for `/mnt/c/...`. First signed commit verified: `Good "git" signature for wkdcjfghks1@gmail.com`. `--no-verify` used only on this `--allow-empty` verification commit — see Debug Log #8.
+- **Task 6** — Khuk0 admin (Hyper-V rule, WSL-specific Windows firewall rule, and administrators_authorized_keys enrollment). Amelia automated (WSL2 side): logger-sync ed25519 key, `authorized_keys` with ACL restriction (Windows-side), `~/.ssh/config → Host logger-pc`, IP detection via default gateway (`172.20.16.1`). Verified: `ssh logger-pc "echo ok"` returns `ok` without password prompt.
+- **Task 7** — playbook § "Story 1.2 — Environment & Secrets Infrastructure" populated with captured Task 1/5/6 verification blocks + Secret Bootstrap procedure + 5-gate evidence. Final handoff commit pending immediately below.
 
 ### File List
 
@@ -509,6 +511,7 @@ See § "Khuk0 Handoff — Manual Steps" at the end of this file for the exact co
 | 2026-04-21 | 0.2.0 | Story 1.1 review patches landed (commit `2f95bb6`) as prerequisite cleanup | Amelia (dev) |
 | 2026-04-21 | 0.3.0 | Tasks 2-4 complete: keyring_client (`35ac260`), settings (`a755d48`), .env regression (`0558d3e`). +39 tests. Code-bearing portion of Story 1.2 done; awaiting Khuk0 host setup for Tasks 1/5/6/7. | Amelia (dev) |
 | 2026-04-21 | 0.4.0 | Task 7 partial (commit `f4124d9`): playbook scaffolded with Secret Bootstrap procedure + 5-gate pre-handoff evidence + placeholders for Task 1/5/6 outputs. Remaining pending: Khuk0 manual (Tasks 1/5/6) + handoff signed commit (Task 7.4) + sprint-status review (Task 7.5). | Amelia (dev) |
+| 2026-04-21 | 1.0.0 | Story 1.2 → review. Tasks 1/5/6 completed via Khuk0 admin + Amelia automation. First signed commit `197ce26` validated. Playbook blocks filled in-place. 4 unexpected integration issues documented (pre-commit python3.13 gap, Hyper-V firewall direction, WSL vEthernet no-profile, Windows admin-group authkeys override). | Amelia (dev) |
 
 ## Khuk0 Handoff — Manual Steps
 

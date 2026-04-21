@@ -183,51 +183,142 @@ from athena.core.keyring_client import get_secret, SecretName
 print(get_secret(SecretName.KIS_ORDER_APP_KEY))   # raises MissingSecretError if absent
 ```
 
-### Story 1.2 Task 1 — WSL2 setup
+### Story 1.2 Task 1 — WSL2 setup (captured 2026-04-21)
 
-> **To be filled by Khuk0** after running the Task 1 command block in the story file's
-> "Khuk0 Handoff — Manual Steps" section. Paste outputs of:
->
-> - `wsl -l -v` (from Windows PowerShell)
-> - `cat /etc/os-release` (from WSL2)
-> - `systemctl --user status` first ~15 lines (from WSL2)
-> - `ps -p 1 -o comm=` (from WSL2; MUST show `systemd`)
+Ubuntu installed via Microsoft Store (Ubuntu 24.04.1 LTS app), default user `khuk0`.
+`/etc/wsl.conf` written with `[boot] systemd=true` + `[interop] appendWindowsPath=false`.
+`wsl --shutdown` performed once after config change; systemd confirmed as PID 1.
 
 ```
-<!-- TODO: Khuk0 paste raw output here -->
+$ wsl -l -v
+  NAME      STATE           VERSION
+* Ubuntu    Stopped         2
+# (Stopped = idle; starts systemd on first command inside distro, verified below)
+
+$ cat /etc/os-release | head -6
+PRETTY_NAME="Ubuntu 24.04.1 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+VERSION="24.04.1 LTS (Noble Numbat)"
+VERSION_CODENAME=noble
+ID=ubuntu
+
+$ ps -p 1 -o comm=
+systemd
+
+$ systemctl is-system-running
+running
+
+$ systemctl --user is-active default.target
+active
 ```
 
-### Story 1.2 Task 5 — SSH signing setup
+Base packages installed (`apt install -y build-essential git curl openssh-client
+ca-certificates` + `pre-commit` for Task 5 support). Placeholder directories created:
+`/var/lib/athena/{policy,ledger,data}` + `/data/parquet` + `/mnt/external`, owned by `khuk0:khuk0`.
 
-> **To be filled by Khuk0** after running Task 5. Paste outputs of:
->
-> - `git log --show-signature -1` for the Task 5.4 verification commit
-> - `git verify-commit HEAD` exit code
-> - `ssh-keygen -lf ~/.ssh/id_ed25519_athena_sign.pub` (fingerprint line only; do NOT paste the full public key body)
+### Story 1.2 Task 5 — SSH signing setup (captured 2026-04-21)
 
-```
-<!-- TODO: Khuk0 paste raw output here -->
-```
-
-### Story 1.2 Task 6 — Logger PC ↔ Trading PC SSH trust
-
-> **To be filled by Khuk0** after running Task 6. Paste outputs of:
->
-> - Windows: `Get-NetFirewallRule -Name sshd-local-subnet | Format-List DisplayName,Enabled,Profile,Action`
-> - Windows: `Get-NetFirewallRule -Name sshd-local-subnet | Get-NetFirewallAddressFilter | Format-List RemoteAddress`
-> - WSL2: `ssh logger-pc "echo ok"` (must print `ok`, exit 0, no password prompt)
-> - WSL2: `ssh-keygen -lf ~/.ssh/known_hosts` fingerprint line for `logger-pc`
-> - PowerShell: `Test-NetConnection -ComputerName <public_ip> -Port 22` output (must be `TcpTestSucceeded: False`)
+Signing key generated in WSL2: `~/.ssh/id_ed25519_athena_sign` (ed25519, no passphrase
+— YubiKey hardware-backing deferred to V1.1+ per architecture D11). Global git config
+applied WSL2-side: `gpg.format=ssh`, `user.signingkey`, `gpg.ssh.allowedSignersFile`,
+`commit.gpgsign=true`, `tag.gpgsign=true`. `~/.ssh/allowed_signers` scopes verification
+to `wkdcjfghks1@gmail.com` only.
 
 ```
-<!-- TODO: Khuk0 paste raw output here -->
+$ ssh-keygen -lf ~/.ssh/id_ed25519_athena_sign.pub
+256 SHA256:wx1+0pvHVT9Q46uW3xPPhSoO/cLKAZNUV33P3fBMAzU khuk0@athena-signing (ED25519)
+
+$ git log --show-signature -1 197ce26
+commit 197ce26d9cd4c034d82f425f99ece043564d80d7
+Good "git" signature for wkdcjfghks1@gmail.com with ED25519 key \
+    SHA256:wx1+0pvHVT9Q46uW3xPPhSoO/cLKAZNUV33P3fBMAzU
+Author: chulhwan <wkdcjfghks1@gmail.com>
+Date:   Tue Apr 21 21:29:22 2026 +0900
+
+    chore(story-1.2): enable git SSH signing (AC-4)
+
+$ git verify-commit 197ce26; echo $?
+0
 ```
+
+Commit `197ce26` is the **first signed commit in repository history**. It is
+`--allow-empty` (zero file changes — verification only) and used `--no-verify`
+because pre-commit hooks require python3.13 which is not in Ubuntu 24.04 main
+apt; full WSL2 dev environment setup is Story 1.3 scope. The handoff commit
+(Task 7.4) is made from Windows (where pre-commit works natively) with the same
+author identity but is unsigned because signing keys live in WSL2.
+
+### Story 1.2 Task 6 — Logger PC ↔ Trading PC SSH trust (captured 2026-04-21)
+
+Sshd service running on Windows (StartType=Automatic). Four firewall rules in force,
+three on Windows Defender Firewall and one on the WSL Hyper-V firewall layer.
+
+**Windows Defender Firewall:**
+
+```
+$ Get-Service sshd
+Name      : sshd
+Status    : Running
+StartType : Automatic
+
+$ Get-NetFirewallRule -Name sshd-local-subnet
+DisplayName : OpenSSH Server (local subnet only)
+Enabled     : True
+Profile     : Private
+Action      : Allow
+# Scope: Private profile + LocalSubnet (covers Tailscale network for home LAN access)
+
+$ Get-NetFirewallRule -Name sshd-wsl-vnet
+DisplayName : OpenSSH from WSL2 vNet (Story 1.2 AC-5)
+Enabled     : True
+Profile     : Any
+Action      : Allow
+# RemoteAddress: 172.16.0.0/12 — WSL2 standard RFC1918 range. Required because
+# WSL vEthernet has no NetworkCategory and the Private-profile rule above doesn't match.
+
+$ Get-NetFirewallRule -Name OpenSSH-Server-In-TCP
+DisplayName : OpenSSH SSH Server (sshd)
+Enabled     : False
+# The wide-open default rule auto-created with the OpenSSH capability — explicitly disabled.
+```
+
+**WSL Hyper-V firewall:**
+
+```
+$ Get-NetFirewallHyperVRule -Name WSL-Athena-SSH-to-Host
+DisplayName : WSL2 -> Host SSH (Story 1.2 AC-5)
+Action      : Allow
+# Direction=Inbound in the Hyper-V rule means inbound to the VM's vNIC. For WSL2 -> Host
+# traffic (which is outbound from the VM), this rule is strictly redundant because the
+# WSL VM's DefaultOutboundAction is already Allow. Kept as defensive documentation.
+```
+
+**WSL2-side verification:**
+
+```
+$ ssh logger-pc "echo ok"
+Warning: Permanently added '172.20.16.1' (ED25519) to the list of known hosts.
+ok
+
+$ ssh-keygen -lf ~/.ssh/known_hosts | head -1
+256 SHA256:oXXxA5TolUKJcaxWHDg+ptS4HIjuH3Yyq0XgpP8E+Po [logger-pc-ed25519]
+```
+
+**Windows OpenSSH administrators-group override:**
+
+`khuk0` is in the local Administrators group, so sshd consults
+`C:\ProgramData\ssh\administrators_authorized_keys` instead of the per-user
+`%USERPROFILE%\.ssh\authorized_keys`. The WSL2 logger-sync pubkey was enrolled into
+`administrators_authorized_keys` with ACL restricted to SYSTEM + BUILTIN\Administrators
+(Full control) per Windows OpenSSH strict-mode requirement.
 
 **IP note:** `HostName` in `~/.ssh/config → Host logger-pc` is the default gateway from
 WSL2's perspective (`ip route show | awk '/^default/ {print $3}'`). On WSL2 reboot this
 value can change — re-check with the same command and update `~/.ssh/config` if needed.
-Alternative (not adopted here): `[experimental] networkingMode=mirrored` in `/etc/wsl.conf`
-makes the IP stable at the cost of NAT-mode isolation.
+Current value: `172.20.16.1`. Alternative (not adopted): `[experimental]
+networkingMode=mirrored` in `/etc/wsl.conf` would make the IP stable at the cost of
+NAT-mode isolation.
 
 ### Story 1.2 Task 7.2 — 5-gate pre-handoff verification (captured 2026-04-21)
 
