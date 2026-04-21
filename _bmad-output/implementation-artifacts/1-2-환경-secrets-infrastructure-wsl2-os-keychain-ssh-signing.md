@@ -461,6 +461,12 @@ claude-opus-4-7 (1M context) — implementing as Amelia (bmad-agent-dev persona)
 - **Task 2** (commit `35ac260`) — `athena.core.keyring_client` with 14-secret `SecretName(StrEnum)` registry + `get_secret` / `set_secret` + AST no-shell defense. Bundled Task 4.2 mypy hook deps fix + Story 1.1 deferred `explicit_package_bases` fix + ruff S105 per-file-ignore. +15 tests.
 - **Task 3** (commit `a755d48`) — `athena.core.settings` with `_ensure_no_dotenv_files` import-time guard + `Settings(BaseSettings)` (frozen, extra=forbid, 14 non-caching secret accessors) + `get_settings()` lru_cache singleton. +22 tests.
 - **Task 4** (commit `0558d3e`) — `tests/regression/test_no_dotenv_files.py` full-tree `.env` ban with independent `EXCLUDE_DIRS` duplicate + drift detector. +2 tests.
+- **Task 7 partial** (commit `f4124d9`) — pre-handoff advance work:
+  - 7.1 scaffolded: Secret Bootstrap procedure (OS-native UI + dev one-liner) + placeholder blocks for Task 1/5/6 outputs (Khuk0 pastes)
+  - 7.2 ✓ 5-gate captured in playbook (uv sync / pytest 111 passed / pre-commit all green / lint-imports 5 kept / wheel build success)
+  - 7.3 ✓ test count recorded (+39 new, 111 passing)
+  - 7.4 pending: handoff signed commit (requires Task 5 signing active)
+  - 7.5 pending: sprint-status in-progress → review (follows 7.4)
 
 **Test suite delta:** Story 1.1 closed at 72 passing / 2 skipped (includes Story 1.1 review patches). Story 1.2 after Tasks 2-4: **111 passing / 2 skipped** (+39 new tests — estimate in story Task 7.3 was "+19 min, +25 max"; actual is higher because `_ensure_no_dotenv_files` parametrize expansion adds 5 cases per filename, and full accessor coverage/missing-error/literal-rejection paths added).
 
@@ -488,10 +494,12 @@ See § "Khuk0 Handoff — Manual Steps" at the end of this file for the exact co
 - `.pre-commit-config.yaml` (Task 2 = Task 4.2: mypy hook `additional_dependencies += keyring>=25`)
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` (Task 4: Story 1.2 status `ready-for-dev` → `in-progress`)
 - `_bmad-output/implementation-artifacts/1-2-환경-secrets-infrastructure-wsl2-os-keychain-ssh-signing.md` (self — Dev Agent Record + task checkboxes)
+- `docs/operating_playbook.md` (Task 7.1 scaffolding — Secret Bootstrap + Task 1/5/6 placeholders + 5-gate evidence)
 
-**To be modified during Task 7 (after Khuk0 manual steps):**
-- `docs/operating_playbook.md` — append § "Story 1.2 — Environment & Secrets Infrastructure" with Task 1/5/6 verification blocks
+**To be modified when Khuk0 completes Tasks 1/5/6:**
+- `docs/operating_playbook.md` — paste the raw outputs into the three `<!-- TODO: Khuk0 paste raw output here -->` placeholder blocks
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` — Story 1.2 status `in-progress` → `review`
+- story file `Status:` line — `in-progress` → `review`
 
 ## Change Log
 
@@ -500,6 +508,7 @@ See § "Khuk0 Handoff — Manual Steps" at the end of this file for the exact co
 | 2026-04-21 | 0.1.0 | Story 1.2 file created from epics.md (ready-for-dev) | John (PM) via create-story |
 | 2026-04-21 | 0.2.0 | Story 1.1 review patches landed (commit `2f95bb6`) as prerequisite cleanup | Amelia (dev) |
 | 2026-04-21 | 0.3.0 | Tasks 2-4 complete: keyring_client (`35ac260`), settings (`a755d48`), .env regression (`0558d3e`). +39 tests. Code-bearing portion of Story 1.2 done; awaiting Khuk0 host setup for Tasks 1/5/6/7. | Amelia (dev) |
+| 2026-04-21 | 0.4.0 | Task 7 partial (commit `f4124d9`): playbook scaffolded with Secret Bootstrap procedure + 5-gate pre-handoff evidence + placeholders for Task 1/5/6 outputs. Remaining pending: Khuk0 manual (Tasks 1/5/6) + handoff signed commit (Task 7.4) + sprint-status review (Task 7.5). | Amelia (dev) |
 
 ## Khuk0 Handoff — Manual Steps
 
