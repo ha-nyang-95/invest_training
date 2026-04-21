@@ -1,5 +1,5 @@
 # generated: 2026-04-21
-# last_updated: 2026-04-21  # Story 1.2 done, moved to review
+# last_updated: 2026-04-22  # Story 1.2 code review complete, moved to done
 # project: invest_training
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-21
-last_updated: 2026-04-21
+last_updated: 2026-04-22
 project: invest_training
 project_key: NOKEY
 tracking_system: file-system
@@ -45,7 +45,7 @@ development_status:
   # Epic 1: Foundation & Market Truth Capture
   epic-1: in-progress
   1-1-프로젝트-bootstrap-uv-monorepo-scaffold: done
-  1-2-환경-secrets-infrastructure-wsl2-os-keychain-ssh-signing: review
+  1-2-환경-secrets-infrastructure-wsl2-os-keychain-ssh-signing: done
   1-3-self-hosted-ci-cd-pipeline-7단계-gate: backlog
   1-4-duckdb-parquet-shard-rsync-data-pipeline: backlog
   1-5-pre-trade-ledger-초기-세그먼트-sha-256-체인: backlog

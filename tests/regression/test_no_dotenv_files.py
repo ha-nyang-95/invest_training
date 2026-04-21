@@ -44,29 +44,38 @@ EXCLUDE_DIRS: frozenset[str] = frozenset(
 )
 
 
-def _is_dotenv_file(path: Path) -> bool:
-    return path.is_file() and (path.name == ".env" or fnmatch(path.name, ".env.*"))
+def _matches_dotenv_name(name: str) -> bool:
+    """Case-insensitive match — mirrors runtime guard (Story 1.2 review 2026-04-22)."""
+    lower = name.lower()
+    return lower == ".env" or fnmatch(lower, ".env.*")
 
 
 def _walk_for_dotenv(root: Path) -> list[Path]:
-    """Depth-unlimited walk; prune EXCLUDE_DIRS at every level."""
+    """Depth-unlimited walk; prune EXCLUDE_DIRS at every level.
+
+    Symlink policy (aligned with runtime guard): a symlink whose NAME matches
+    `.env*` is a violation regardless of what it resolves to — record it.
+    Symlinks that do NOT match the name are skipped to avoid cycle loops and
+    accidental home-dir traversal via dev-convenience links.
+    """
     hits: list[Path] = []
     stack: list[Path] = [root]
     while stack:
         current = stack.pop()
         try:
             entries = list(current.iterdir())
-        except (PermissionError, FileNotFoundError):
+        except (PermissionError, FileNotFoundError, OSError):
             continue
         for entry in entries:
+            if _matches_dotenv_name(entry.name):
+                hits.append(entry)
+                continue
             if entry.is_symlink():
-                continue  # don't chase symlinks — avoids infinite loops
+                continue  # non-matching symlinks: skip to avoid cycles
             if entry.is_dir():
                 if entry.name in EXCLUDE_DIRS:
                     continue
                 stack.append(entry)
-            elif _is_dotenv_file(entry):
-                hits.append(entry)
     return hits
 
 
@@ -82,15 +91,20 @@ def test_no_dotenv_files_in_workspace() -> None:
     )
 
 
-def test_exclude_lists_stay_in_sync() -> None:
-    """The runtime guard and the regression test MUST agree on the core
-    exclude set (toolchain + BMAD dirs). The regression test adds cache
-    directories (.mypy_cache, .ruff_cache, ...) that are CI-level concerns;
-    the runtime guard does not need them because depth-1 coverage doesn't
-    reach into caches anyway."""
+def test_regression_excludes_are_superset_of_runtime() -> None:
+    """Asymmetric-by-design: the regression `EXCLUDE_DIRS` MUST be a superset
+    of the runtime `_EXCLUDE_DIRS`. The regression list additionally prunes
+    tool cache dirs (`.mypy_cache`, `.ruff_cache`, `.pytest_cache`,
+    `.import_linter_cache`) that are CI-level concerns; the runtime guard
+    does not need them because its depth-1 coverage does not reach caches
+    anyway.
+
+    Invariant protected: if a future edit adds a new dir to the runtime
+    guard without also adding it here, the regression walker could fail on
+    content that the runtime silently allows — creating CI false positives.
+    """
     from athena.core.settings import _EXCLUDE_DIRS as SETTINGS_EXCLUDE_DIRS
 
-    # Every dir the runtime guard excludes MUST also be excluded here.
     missing_in_regression = SETTINGS_EXCLUDE_DIRS - EXCLUDE_DIRS
     assert not missing_in_regression, (
         f"regression test must exclude everything the runtime guard excludes, "

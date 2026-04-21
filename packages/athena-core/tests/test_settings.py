@@ -97,9 +97,9 @@ def test_dotenv_guard_does_not_recurse_deeper_than_1(tmp_path: Path) -> None:
     _ensure_no_dotenv_files(tmp_path)  # must not raise
 
 
-def test_dotenv_guard_ignores_env_example(tmp_path: Path) -> None:
-    """`.env.example` without content matching `.env.*` glob is still blocked —
-    our guard explicitly forbids ANY .env.* variant to kill the template bait."""
+def test_dotenv_guard_rejects_env_example(tmp_path: Path) -> None:
+    """`.env.example` is blocked — the guard forbids ANY `.env.*` variant to
+    kill the template bait (even innocuous placeholder files)."""
     (tmp_path / ".env.example").write_text("PLACEHOLDER=x", encoding="utf-8")
     with pytest.raises(SystemExit, match=r"\.env usage forbidden by NFR-S1"):
         _ensure_no_dotenv_files(tmp_path)

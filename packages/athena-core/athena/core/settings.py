@@ -32,10 +32,23 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def _detect_repo_root() -> Path:
-    """Walk up from this file to the workspace root, or honour ATHENA_REPO_ROOT."""
-    override = os.environ.get("ATHENA_REPO_ROOT")
+    """Walk up from this file to the workspace root, or honour ATHENA_REPO_ROOT.
+
+    Whitespace-only override collapses to the auto-detected default — avoids a
+    `Path("  ").resolve() == CWD` footgun where a trailing-space env value
+    would silently make the guard scan the shell's working directory instead
+    of the repo. An override pointing at a non-existent path raises a loud
+    `ValueError` so a typo fails the process immediately rather than silently
+    skipping the `.env` scan.
+    """
+    override = os.environ.get("ATHENA_REPO_ROOT", "").strip()
     if override:
-        return Path(override).resolve()
+        resolved = Path(override).resolve()
+        if not resolved.is_dir():
+            raise ValueError(
+                f"ATHENA_REPO_ROOT points at {resolved!s}, which is not an existing directory"
+            )
+        return resolved
     # settings.py -> athena/core -> athena -> athena-core -> packages -> <REPO_ROOT>
     return Path(__file__).resolve().parents[4]
 
@@ -57,7 +70,7 @@ _EXCLUDE_DIRS: Final[frozenset[str]] = frozenset(
 
 
 def _ensure_no_dotenv_files(root: Path) -> None:
-    """Fail-fast: abort process if any `.env` / `.env.*` file exists in scope.
+    """Fail-fast: abort process if any `.env` / `.env.*` entry exists in scope.
 
     Scope: `root` itself + all depth-1 subdirectories not in `_EXCLUDE_DIRS`.
     Deeper nesting is deliberately out of scope to prevent the walk from
@@ -66,26 +79,52 @@ def _ensure_no_dotenv_files(root: Path) -> None:
     test (`tests/regression/test_no_dotenv_files.py`) walks the entire
     workspace tree for CI-level defence in depth.
 
+    Hardening (Story 1.2 review 2026-04-22):
+      - Name match is case-insensitive to catch `.ENV` on NTFS / case-preserving WSL mounts.
+      - Entries are matched by NAME regardless of file/dir/symlink — so a `.env/`
+        directory or a broken `.env` symlink is still flagged.
+      - Symlinked depth-1 subdirs are skipped to prevent `ln -s $HOME mydocs`
+        from walking the user's home tree.
+      - `iterdir` failures (permission denied, stale mount, race deletion) are
+        swallowed rather than leaking a bare `OSError` that would break the
+        AC-3 fixed `SystemExit` contract.
+
     On match: raises `SystemExit(".env usage forbidden by NFR-S1: found <path>")`
     — message format is fixed by AC-3 and exercised by the regression test.
     """
     if not root.is_dir():
         return
 
-    for item in root.iterdir():
-        if _is_dotenv_file(item):
+    try:
+        top_entries = list(root.iterdir())
+    except (PermissionError, FileNotFoundError, OSError):
+        return
+
+    for item in top_entries:
+        if _matches_dotenv_name(item.name):
             raise SystemExit(f".env usage forbidden by NFR-S1: found {item}")
 
-    for subdir in root.iterdir():
-        if not subdir.is_dir() or subdir.name in _EXCLUDE_DIRS:
+    for subdir in top_entries:
+        if not subdir.is_dir() or subdir.is_symlink() or subdir.name in _EXCLUDE_DIRS:
             continue
-        for item in subdir.iterdir():
-            if _is_dotenv_file(item):
+        try:
+            sub_entries = list(subdir.iterdir())
+        except (PermissionError, FileNotFoundError, OSError):
+            continue
+        for item in sub_entries:
+            if _matches_dotenv_name(item.name):
                 raise SystemExit(f".env usage forbidden by NFR-S1: found {item}")
 
 
-def _is_dotenv_file(path: Path) -> bool:
-    return path.is_file() and (path.name == ".env" or fnmatch(path.name, ".env.*"))
+def _matches_dotenv_name(name: str) -> bool:
+    """Case-insensitive match against `.env` or `.env.*`.
+
+    Entry type (file / dir / symlink / broken) is intentionally NOT consulted —
+    any filesystem entry with this name violates NFR-S1 spirit regardless of
+    what it resolves to.
+    """
+    lower = name.lower()
+    return lower == ".env" or fnmatch(lower, ".env.*")
 
 
 # Import-time enforcement: the first thing any athena runtime touches

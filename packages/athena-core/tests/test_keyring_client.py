@@ -58,12 +58,23 @@ def test_get_secret_uses_athena_service(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_get_secret_raises_missing_error(fake_store: dict[tuple[str, str], str]) -> None:
-    del fake_store  # empty store — nothing to fetch
+    # fake_store is pre-emptied by the fixture; no need to touch it.
+    assert not fake_store
     with pytest.raises(
         MissingSecretError,
         match=r"^KIS_ORDER_APP_KEY not in OS Keychain$",
     ):
         get_secret(SecretName.KIS_ORDER_APP_KEY)
+
+
+def test_get_secret_raises_on_empty_string(fake_store: dict[tuple[str, str], str]) -> None:
+    """Empty-string secret is treated as missing (Story 1.2 review P7)."""
+    fake_store[(KEYRING_SERVICE, "DART_API_KEY")] = ""
+    with pytest.raises(
+        MissingSecretError,
+        match=r"^DART_API_KEY not in OS Keychain$",
+    ):
+        get_secret(SecretName.DART_API_KEY)
 
 
 def test_get_secret_accepts_raw_str(monkeypatch: pytest.MonkeyPatch) -> None:

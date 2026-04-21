@@ -70,12 +70,24 @@ def get_secret(name: SecretName | str) -> str:
     log, or otherwise persist the return value outside of in-memory transient
     usage (architecture.md#NFR-S1 mapping, line 1009).
 
+    Empty-string values (`""`) are treated the same as missing — a keyring
+    entry cleared to zero length cannot authenticate anything downstream, so
+    we surface the clear `MissingSecretError` rather than letting a silent
+    empty string propagate to a brittle HTTP 401 later.
+
+    Keyring backend failure (no Secret Service on headless WSL, daemon crash,
+    etc.) propagates `keyring.errors.KeyringError` unchanged by design — this
+    is an infrastructure / setup failure and Athena's Kill-Switch philosophy
+    prefers process death with the root cause preserved over silently folding
+    it into the `MissingSecretError` contract.
+
     Raises:
-        MissingSecretError: when the key is not present in the keyring.
-            Message format is fixed by AC-2: `f"{name} not in OS Keychain"`.
+        MissingSecretError: when the key is absent OR stored as an empty
+            string. Message format is fixed by AC-2: `f"{name} not in OS Keychain"`.
+        keyring.errors.KeyringError: when the backend itself is unavailable.
     """
     value = keyring.get_password(KEYRING_SERVICE, str(name))
-    if value is None:
+    if not value:
         raise MissingSecretError(f"{name} not in OS Keychain")
     return value
 
