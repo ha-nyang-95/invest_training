@@ -8,6 +8,7 @@ dependencies = [
     "athena-feature-store",
     "athena-alpha-defense",
     "athena-ops-defense",
+    "python-kis>=2",
 ]
 
 [build-system]

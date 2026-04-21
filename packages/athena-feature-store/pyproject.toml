@@ -5,6 +5,8 @@ requires-python = ">=3.13,<3.14"
 description = "Athena feature store — DuckDB Feature Store, Polars in-memory (depends on athena-core)"
 dependencies = [
     "athena-core",
+    "polars>=1",
+    "duckdb>=1",
 ]
 
 [build-system]

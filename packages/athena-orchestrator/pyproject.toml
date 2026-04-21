@@ -8,6 +8,7 @@ dependencies = [
     "athena-feature-store",
     "athena-alpha-defense",
     "athena-ops-defense",
+    "uvloop>=0.22; sys_platform != 'win32'",
 ]
 
 [build-system]

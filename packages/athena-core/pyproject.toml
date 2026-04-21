@@ -3,7 +3,14 @@ name = "athena-core"
 version = "0.1.0"
 requires-python = ">=3.13,<3.14"
 description = "Athena core — leaf package: BaseDTO, ErrorCode, version, time utilities (no athena-* deps)"
-dependencies = []
+dependencies = [
+    "pydantic>=2,<3",
+    "pydantic-settings>=2,<3",
+    "keyring>=25",
+    # Windows lacks system tzdata; ZoneInfo("Asia/Seoul") in athena.core.time
+    # (and transitively in pykis) needs the IANA database from PyPI.
+    "tzdata>=2024; sys_platform == 'win32'",
+]
 
 [build-system]
 requires = ["hatchling"]

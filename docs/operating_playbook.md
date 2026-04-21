@@ -25,7 +25,36 @@ Recorded by Story 1.1 Task 1.1 on **2026-04-21** (Windows 11 host):
 
 ## Week 1 Day 1 Verification
 
-(populated at end of Story 1.1 Task 3.5 / Task 9.1)
+Story 1.1 Task 3.5 — recorded **2026-04-21**.
+
+```
+$ uv sync --group dev
+Resolved 67 packages in 99ms
+Installed 61 packages, +tzdata==2026.1 (Windows IANA db)
+
+$ uv run python -c "import athena.core, athena.feature_store, athena.alpha_defense, athena.ops_defense, athena.orchestrator, athena.execution; print('ALL 6 OK')"
+ALL 6 OK
+
+$ uv run pytest tests/ packages/ -q
+11 passed, 1 skipped in 0.49s
+```
+
+**Skipped:** `test_uvloop_importable_on_non_windows` — `uvloop` is Linux/macOS only;
+the orchestrator process runs on WSL2 Ubuntu (D17), so Windows dev hosts skip this check.
+
+**Tier-1 dependency snapshot (frozen by uv.lock):**
+
+| Package | Resolved version |
+|---|---|
+| pydantic | 2.13.3 |
+| pydantic-settings | 2.14.0 |
+| keyring | 25.7.0 |
+| polars | 1.40.0 |
+| duckdb | 1.5.2 |
+| python-kis | 2.1.6 |
+| tzdata (Windows) | 2026.1 |
+| pytest / asyncio / xdist | 9.0.3 / 1.3.0 / 3.8.0 |
+| ruff / mypy / pre-commit / import-linter | 0.15.11 / 1.20.1 / 4.5.1 / 2.11 |
 
 ---
 

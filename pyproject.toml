@@ -11,3 +11,26 @@ athena-alpha-defense = { workspace = true }
 athena-ops-defense = { workspace = true }
 athena-orchestrator = { workspace = true }
 athena-execution = { workspace = true }
+
+# Dev tooling shared across all 6 workspace packages (PEP 735).
+# Runtime deps live in each package's [project.dependencies] per AR-BND1 layering.
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "pytest-xdist>=3",
+    "ruff>=0.7",
+    "mypy>=1.13",
+    "pre-commit>=4",
+    "import-linter>=2",
+]
+
+# pytest uses importlib import-mode to avoid test module name collisions
+# across the 6 packages (all define tests/test_*.py) — pytest-official recommendation
+# per https://docs.pytest.org/en/stable/explanation/pythonpath.html#import-modes
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = ["--import-mode=importlib", "-ra", "--strict-markers"]
+testpaths = ["packages", "tests"]
+asyncio_mode = "auto"
+
