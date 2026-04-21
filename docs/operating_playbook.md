@@ -60,7 +60,27 @@ the orchestrator process runs on WSL2 Ubuntu (D17), so Windows dev hosts skip th
 
 ## CI / Self-Hosted Runner Migration
 
-(deferred to Story 1.3 — see `_bmad-output/planning-artifacts/epics.md#Story-1.3`)
+**Story 1.1 baseline (current state):** `.github/workflows/ci.yml` runs on
+`ubuntu-latest` and gates merges with: pre-commit (ruff + mypy + hygiene +
+detect-private-key) → `lint-imports` → `pytest -n auto`. Triggered on every
+push to `master`/`main` and on PR open.
+
+**Story 1.3 migration (planned):**
+
+1. Change `runs-on: ubuntu-latest` → `runs-on: [self-hosted, trading-pc]`
+   (AR-INF3, D19 — physical implementation of the 72h cooling gate).
+2. Add the full 7-stage pipeline:
+   1. Lint + format (ruff)
+   2. Type check (mypy strict)
+   3. Layer enforcement (import-linter)
+   4. Unit + regression tests (pytest)
+   5. Snapshot regression (past 2 failures replay)
+   6. 72h cooling gate marker
+   7. Paper-run verification gate
+3. Add `--cov-fail-under=80` to pytest (coverage gate).
+
+Until Story 1.3 lands, the `scaffold-gate` job is the ONLY CI check — sufficient
+for Story 1.1 verification, intentionally insufficient as a release gate.
 
 ---
 

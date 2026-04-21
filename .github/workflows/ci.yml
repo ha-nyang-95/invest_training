@@ -1,0 +1,46 @@
+name: scaffold-gate
+
+# Story 1.1 Task 8 — baseline CI for the uv monorepo scaffold.
+# Story 1.3 will (a) migrate runs-on to [self-hosted, trading-pc] (AR-INF3),
+# (b) add the full 7-stage pipeline (snapshot regression, 72h cooling gate, Paper run gate).
+# Intentionally NOT named "ci" — leaves room for the Story 1.3 workflow rename.
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scaffold-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout (full history so hatch_build.py git describe works)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv 0.11.7 (pinned per architecture.md line 192)
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.11.7"
+          enable-cache: true
+
+      - name: Install Python 3.13 (pinned per .python-version)
+        run: uv python install 3.13
+
+      - name: Sync workspace (frozen lockfile + dev group)
+        run: uv sync --frozen --group dev
+
+      - name: pre-commit hooks (ruff + mypy + hygiene + secret scanner)
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+
+      - name: import-linter (layer + forbidden contracts)
+        run: uv run lint-imports
+
+      - name: pytest (parallel via pytest-xdist)
+        run: uv run pytest -n auto
