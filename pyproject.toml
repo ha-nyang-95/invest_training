@@ -1,0 +1,13 @@
+# Athena workspace root — virtual workspace (no [project] block per Story 1.1 Task 1.4)
+# Source-of-truth for workspace topology only. All actual packages live under packages/*.
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+athena-core = { workspace = true }
+athena-feature-store = { workspace = true }
+athena-alpha-defense = { workspace = true }
+athena-ops-defense = { workspace = true }
+athena-orchestrator = { workspace = true }
+athena-execution = { workspace = true }
