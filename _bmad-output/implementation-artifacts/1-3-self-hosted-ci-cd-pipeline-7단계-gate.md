@@ -365,7 +365,7 @@ Execute **in order**. Mark `[x]` only when both implementation AND tests pass. R
     EOF
     ```
     (Amelia 는 `<GitHub owner>` 를 `gh repo view --json owner --jq .owner.login` 로 동적 채움. 스크립트 자체는 OWNER 변수를 CLI 인자로 받도록 조정.)
-  - [x] 5.3 `bash scripts/setup_branch_protection.sh` 실행. `jq` 미설치 이슈 발견 → `python3 -m json.tool` 로 교체 (Ubuntu 24.04 stdlib). PR #4 리뷰에서 (a) `gh api` export 에 `Accept: application/vnd.github+json` 헤더 누락, (b) baseline JSON 에 repo 종속 URL 포함 2건 지적 → python3 로 url/_url 키 전체 strip + sorted keys 로 baseline 을 fork/rename 간 portable 하게 sanitize. 최종 `infra/github/branch_protection.json` git 에 add. _Blocked on Khuk0 manual script execution._
+  - [x] 5.3 `bash scripts/setup_branch_protection.sh` 실행. `jq` 미설치 이슈 발견 → `python3 -m json.tool` 로 교체 (Ubuntu 24.04 stdlib). PR #4 리뷰에서 (a) `gh api` export 에 `Accept: application/vnd.github+json` 헤더 누락, (b) baseline JSON 에 repo 종속 URL 포함 2건 지적 → python3 로 url/_url 키 전체 strip + sorted keys 로 baseline 을 fork/rename 간 portable 하게 sanitize. 최종 `infra/github/branch_protection.json` git 에 add (PR #4 squash `128c8ef`).
   - [x] 5.4 `infra/github/` 디렉토리 최초 생성 — Amelia 가 `infra/github/.gitkeep` 으로 디렉토리 보존. baseline JSON 은 Task 5.3 실행 시 덮어씀.
   - [ ] 5.5 로컬 검증: `git push origin master` 비-PR push 거부 — Claude Code sandbox 자체가 이미 master 직접 push 를 "PR bypass" 로 차단. GitHub 측 protected branch rule 의 원본 거부 메시지 재현은 Khuk0 편의 시 1회. deferred-work 로 이관.
   - [ ] 5.6 Windows host unsigned commit 차단 재현 — Story 1.7 Windows 측 SSH signing 완료 이전까지 Windows host 가 commit 주체가 아니므로 재현 환경 부재. `required_signatures=true` 자체는 verified via PR #4 signature check (WSL2 signed commits `verified: true, reason: "valid"` 확인됨). deferred-work 로 이관.
@@ -434,7 +434,7 @@ Execute **in order**. Mark `[x]` only when both implementation AND tests pass. R
       3. staged = `["config/policy.toml"]`, msg = `"policy: adjust"` → exit 0
       4. staged = `[]`, msg = `"policy: noop"` → exit 0 (staged empty → no guard)
   - [x] 6.5 `uv run pytest tests/integration/test_policy_prefix_guard.py -v` → 4/4 pass. 전체 스위트 126 passing / 4 skipped.
-  - [ ] 6.6 수동 end-to-end 검증 (AC-6 절차 1-7) — playbook § "Story 1.3 — Policy Commit End-to-End" 에 각 단계 터미널 출력 캡처. _Blocked on Task 1 (runner) + Task 5 (branch protection apply). Amelia 가 playbook 에 instruction + expected artefacts 를 사전 기록._
+  - [ ] 6.6 수동 end-to-end 검증 (AC-6 절차 1-7) — playbook § "Story 1.3 — Policy Commit End-to-End" 에 각 단계 터미널 출력 캡처. _Deferred to follow-up branch `story-1.3/policy-smoke-test` (not a review blocker): AC-6 unit coverage 4/4 green + `policy-prefix-guard` commit-msg hook 이 post-install 모든 WSL2 commit 에서 "Passed" 로 실행 확인됨 (`c633b8e`, `8f97e4c`, `8a39466`, `2fa00b6`). 7-step full smoke 는 문서 evidence 보강 목적._
   - [x] 6.7 커밋: `feat(ci): policy-prefix-guard hook + placeholder policy.toml (Story 1.3 AC-6)` — SHA `9a763ca`, signed.
 
 - [x] **Task 7: `docs/operating_playbook.md` 업데이트 + 최종 검증 + 핸드오프** (AC: 1-6)
@@ -448,7 +448,7 @@ Execute **in order**. Mark `[x]` only when both implementation AND tests pass. R
   - [x] 7.2 pre-commit commit-msg hook 활성화. WSL2 toolchain closure 시 `uv run pre-commit install --hook-type commit-msg` 실행됨 (출력 `pre-commit installed at .git/hooks/commit-msg`). 이후 모든 WSL2 commit 에서 `Detect policy changes that lack 'policy:' commit prefix...Passed` 확인 (commit `c633b8e`, `8f97e4c`, `8a39466`, `2fa00b6` 등 전체 로그).
   - [x] 7.3 **확장 5-gate** 재실행 — Linux WSL2 `uv run pytest -n auto` 127p/3s (toolchain closure 직후). self-hosted runner CI run `24763894291` · `24766920137` · `24767278380` 전부 `uv sync --frozen --group dev` + pre-commit + import-linter + pytest + cooling/marker gates 통과 → 5-gate 의 자동화된 형태로 충족.
     1. `uv sync --frozen --group dev` — 의존성 변화 없음 확인 (본 스토리는 `[dependency-groups] dev` 변경 없음)
-    2. `uv run pytest -n auto` — 기대 수치: **114 passing / 4 skipped** (Story 1.2 의 113 + Task 3/4/6 의 신규 통합 테스트 3건 = 116 passing; 실제 수치를 Dev Agent Record § Completion Notes 에 기록)
+    2. `uv run pytest -n auto` — 실제 landing 수치: Windows 126p/4s, Linux 127p/3s (delta = uvloop import 테스트가 Linux 에서만 실행; Windows 는 `@pytest.mark.skipif(sys.platform == "win32")`). Story 원본 예측 "114 passing" 은 Task 3.5 의 `test_pytest_markers_registered` 가 최종 2 assertion 으로 확장되면서 +2, Task 4/6 통합 테스트 +10, Story 1.2 기준이 113 대신 111 이었던 이력 조정으로 실제 값이 달라짐. Dev Agent Record Debug Log #4 가 이 재조정을 기록.
     3. `uv run pre-commit run --all-files` — 모든 hook green (gitleaks, ruff, mypy, detect-private-key + new `policy-prefix-guard` 는 commit-msg stage 이므로 `--all-files` 에서는 no-op)
     4. `uv run lint-imports` — import-linter 5개 contract 모두 Kept
     5. `uv build --package athena-core --wheel --out-dir /tmp/athena-1-3-check` — wheel 성공 + `athena/core/_version.py` 내 `__commit__` 가 현재 HEAD SHA 접두어 포함
