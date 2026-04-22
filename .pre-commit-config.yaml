@@ -53,3 +53,15 @@ repos:
       - id: check-merge-conflict
       - id: end-of-file-fixer
       - id: trailing-whitespace
+
+  # Story 1.3 Task 6 — block policy-file commits without the `policy:` prefix.
+  # commit-msg stage: requires `pre-commit install --hook-type commit-msg`.
+  - repo: local
+    hooks:
+      - id: policy-prefix-guard
+        name: Detect policy changes that lack `policy:` commit prefix
+        entry: python scripts/check_policy_prefix.py
+        language: system
+        stages: [commit-msg]
+        always_run: true
+        require_serial: true
