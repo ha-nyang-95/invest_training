@@ -13,6 +13,11 @@ Type=oneshot
 # logger-pc is a Host alias in ~/.ssh/config (IdentityFile points at the
 # dedicated id_ed25519_athena_sync key; separate from the signing key per NFR-S2).
 ExecStart=/usr/bin/rsync -a --partial --partial-dir=.rsync-partial --timeout=30 --bwlimit=0 logger-pc:/data/parquet/ /data/parquet/
+# Story 1.4 AC-5: emit Prometheus textfile-collector metric after every run
+# (including failures). Duration placeholder is 0 in V1.0 — accurate duration
+# measurement (cgroup cpu-time or wall-clock via ExecStartPre sentinel file)
+# is deferred to Story 1.9.
+ExecStartPost=/home/khuk0/invest_training/.venv/bin/python /home/khuk0/invest_training/scripts/emit_logger_sync_metric.py --exit-code $EXIT_STATUS --duration 0 --output /var/lib/node_exporter/textfile_collector/athena_logger_sync.prom
 StandardOutput=append:/var/log/athena/logger-sync.log
 StandardError=append:/var/log/athena/logger-sync.log
 User=khuk0
