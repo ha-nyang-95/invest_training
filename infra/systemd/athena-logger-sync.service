@@ -1,0 +1,26 @@
+[Unit]
+# Athena cross-PC data pipeline — pulls hourly Parquet shards from Logger PC
+# to Trading PC every 60s. Source: Story 1.4 AC-3, architecture.md #D12
+# (rsync over SSH), #D18 (systemd supervisor on Trading PC).
+Description=Athena Parquet shard sync (Logger PC -> Trading PC)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# -a archive; --partial + --partial-dir resume interrupted transfers across
+# the 60s boundary; --timeout=30 bounds a stuck connection.
+# logger-pc is a Host alias in ~/.ssh/config (IdentityFile points at the
+# dedicated id_ed25519_athena_sync key; separate from the signing key per NFR-S2).
+ExecStart=/usr/bin/rsync -a --partial --partial-dir=.rsync-partial --timeout=30 --bwlimit=0 logger-pc:/data/parquet/ /data/parquet/
+StandardOutput=append:/var/log/athena/logger-sync.log
+StandardError=append:/var/log/athena/logger-sync.log
+User=khuk0
+Group=khuk0
+# rsync exit 0=success; 23/24=partial/vanished (network transient — next
+# timer catches up); 30=timeout. Anything else (1, 11, 12, ...) surfaces
+# as failure in journal (Story 1.9 OnFailure= hook will route alerts).
+SuccessExitStatus=0 23 24 30
+
+[Install]
+WantedBy=multi-user.target

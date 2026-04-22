@@ -1,0 +1,16 @@
+[Unit]
+# Fires athena-logger-sync.service every 60s. Story 1.4 AC-3.
+Description=Athena Parquet shard sync — every 60s
+Requires=athena-logger-sync.service
+
+[Timer]
+# First run 30s after boot (give network time to settle), then every 60s.
+# AccuracySec=5s keeps timer drift bounded without burning a wake-up every second.
+# Persistent=true causes missed fires during downtime to run on next boot.
+OnBootSec=30s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
