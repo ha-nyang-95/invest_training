@@ -14,7 +14,14 @@ build/
 packages/*/athena/*/_version.py
 
 # Data and secrets (NFR-S1: .env forbidden forever)
-data/
+# Ignore data contents but seed the hot/cold substrate tree (Story 1.4 AC-1).
+data/*
+!data/duckdb
+!data/parquet
+data/duckdb/*
+!data/duckdb/.gitkeep
+data/parquet/*
+!data/parquet/.gitkeep
 .env
 .env.*
 

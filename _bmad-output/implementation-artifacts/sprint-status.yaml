@@ -1,5 +1,5 @@
 # generated: 2026-04-21
-# last_updated: 2026-04-22  # Story 1.3 → review (runner + CI + branch protection all landed via PR #1 merge 2126521 + PR #4 squash 128c8ef)
+# last_updated: 2026-04-22  # Story 1.4 → review (7 tasks all [x], 173p/4s, 7 signed commits: 9825753, df11d24, f3191fd, 7b5d3c4, 3d99a2e (1.3 post-facto), 1f1c84a, 64006e8, + handoff)
 # project: invest_training
 # project_key: NOKEY
 # tracking_system: file-system
@@ -36,6 +36,7 @@
 
 generated: 2026-04-21
 last_updated: 2026-04-22
+# create-story (Story 1.4): comprehensive context engine — Logger DuckDB + Parquet shard + Trading rsync substrate
 project: invest_training
 project_key: NOKEY
 tracking_system: file-system
@@ -46,8 +47,8 @@ development_status:
   epic-1: in-progress
   1-1-프로젝트-bootstrap-uv-monorepo-scaffold: done
   1-2-환경-secrets-infrastructure-wsl2-os-keychain-ssh-signing: done
-  1-3-self-hosted-ci-cd-pipeline-7단계-gate: review
-  1-4-duckdb-parquet-shard-rsync-data-pipeline: backlog
+  1-3-self-hosted-ci-cd-pipeline-7단계-gate: done
+  1-4-duckdb-parquet-shard-rsync-data-pipeline: review
   1-5-pre-trade-ledger-초기-세그먼트-sha-256-체인: backlog
   1-6-f5-읽기전용-마운트-systemd-timer-infrastructure: backlog
   1-7-l2-호가창-websocket-로거-24-7-fr1: backlog
