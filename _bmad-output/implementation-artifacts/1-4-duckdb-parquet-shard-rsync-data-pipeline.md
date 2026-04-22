@@ -166,25 +166,25 @@ so that **DuckDB single-writer 제약을 Logger PC 내부로 격리하면서 NFR
       athena_logger_sync_duration_seconds 4.2
       ```
     - **textfile collector 선택 이유**: Trading PC 는 단일 호스트 + Prometheus 로컬 scrape — pushgateway 불필요 (architecture.md#D22 "Prometheus 단독" 정책). node_exporter 의 textfile collector 는 systemd oneshot 서비스에 자연스럽게 통합.
-  - `infra/systemd/athena-logger-sync.service` 의 `ExecStartPost=` 에 metric emit 추가:
+  - `infra/systemd/athena-logger-sync.service` 의 **`ExecStopPost=`** 에 metric emit 호출 (review-flip 2026-04-22 정정: 원래 spec 은 `ExecStartPost=` 였으나 systemd.service(5) 에 의하면 `$EXIT_STATUS`/`$SERVICE_RESULT` 는 `ExecStopPost=` 에서만 populate 됨 — `ExecStartPost=` 에서는 빈 값이라 exit_code metric 이 구조적으로 0 으로 고정되어 AC-5 alarm 의 유일한 신호원이 파손됨):
     ```ini
-    ExecStartPost=/bin/bash -c '/usr/bin/python3 /home/khuk0/invest_training/scripts/emit_logger_sync_metric.py --exit-code $EXIT_STATUS --duration $(( $(date +%s) - $START_TS )) --output /var/lib/node_exporter/textfile_collector/athena_logger_sync.prom'
+    ExecStopPost=/home/khuk0/invest_training/.venv/bin/python /home/khuk0/invest_training/scripts/emit_logger_sync_metric.py --exit-code $EXIT_STATUS --duration 0 --output /var/lib/node_exporter/textfile_collector/athena_logger_sync.prom
     ```
-  - `infra/prometheus/rules/data_pipeline.rules.yml` (신규 파일, 1개 alerting rule):
+  - `infra/prometheus/rules/data_pipeline.rules.yml` (신규 파일, 1개 alerting rule — review-flip 2026-04-22: `absent()` disjunct 추가로 시계열 자체 부재 시의 silent-failure 모드 차단):
     ```yaml
     groups:
       - name: athena_data_pipeline
         rules:
           - alert: LoggerSyncLagHigh
-            expr: time() - athena_logger_sync_last_success_seconds > 120
+            expr: absent(athena_logger_sync_last_success_seconds) or (time() - athena_logger_sync_last_success_seconds > 120)
             for: 30s
             labels:
               severity: high
             annotations:
-              summary: "Logger -> Trading rsync lag exceeded 120s"
-              description: "Last successful rsync was {{ $value }}s ago. Check logger-pc network + SSH key + rsync log at /var/log/athena/logger-sync.log."
+              summary: "Logger -> Trading rsync lag exceeded 120s (or metric series absent)"
+              description: "Last successful rsync was {{ $value }}s ago (or the metric series is missing entirely — check that athena-logger-sync.service ExecStopPost ran). Check logger-pc network + SSH key + rsync log at /var/log/athena/logger-sync.log."
     ```
-  - **본 스토리 scope**: rule 파일 작성 + textfile metric emit + node_exporter 의 textfile collector path 가 unit `ExecStartPost` 에 명시 — 단, **Prometheus 자체 설치 + Alertmanager 라우팅 + node_exporter 설치는 Story 1.9 (observability stack) 소관**. 따라서 본 스토리는 metric 파일이 디스크에 쓰여지는지까지만 단위 테스트로 검증. 실제 Prometheus alert 발송은 Story 1.9 이후 통합 시점에 검증.
+  - **본 스토리 scope**: rule 파일 작성 + textfile metric emit + node_exporter 의 textfile collector path 가 unit `ExecStopPost=` 에 명시 — 단, **Prometheus 자체 설치 + Alertmanager 라우팅 + node_exporter 설치는 Story 1.9 (observability stack) 소관**. 따라서 본 스토리는 metric 파일이 디스크에 쓰여지는지까지만 단위 테스트로 검증. 실제 Prometheus alert 발송은 Story 1.9 이후 통합 시점에 검증.
 
 **Then** `tests/integration/test_logger_sync_metric.py` (`@pytest.mark.integration`) 가 `emit_logger_sync_metric.py --exit-code 0 --duration 4.2 --output <tmp>/x.prom` 실행 → tmp 파일에 위 3개 메트릭 라인 정확히 기록 (정규식 매칭 + 타임스탬프 ±2초 tolerance)
 **And** `--exit-code 23` (partial transfer transient — `SuccessExitStatus` 매칭) 도 `last_success_seconds` 갱신 (rsync 의미론상 데이터는 일부 도착했으므로 lag 카운트 리셋)
@@ -374,15 +374,21 @@ Execute **in order**. Mark `[x]` only when both implementation AND tests pass. R
                 _create_empty_view(conn, table)
 
     def _create_empty_view(conn: duckdb.DuckDBPyConnection, table: str) -> None:
-        # Reuse DDL from schemas.py but as a view-on-empty-table pattern.
+        # review-flip 2026-04-22: temporary=True is load-bearing — without it
+        # _empty_<table> becomes a persistent table in decisions.duckdb and
+        # the view-attach step violates D1 / #PT-2 by silently widening the
+        # Trading PC write scope. DROP first so re-attach after a schema-evolution
+        # change cannot see a stale TEMP TABLE from the prior session.
         from athena.feature_store.schemas import (
             create_ticks_table, create_quotes_table, create_news_table,
         )
+        empty_name = f"_empty_{table}"
+        conn.execute(f"DROP TABLE IF EXISTS {empty_name}")
         creator = {"ticks": create_ticks_table, "quotes": create_quotes_table, "news": create_news_table}[table]
-        creator(conn, table_name=f"_empty_{table}")
-        conn.execute(f"CREATE OR REPLACE VIEW {table} AS SELECT * FROM _empty_{table}")
+        creator(conn, table_name=empty_name, temporary=True)
+        conn.execute(f"CREATE OR REPLACE VIEW {table} AS SELECT * FROM {empty_name}")
     ```
-    `_create_empty_view` 가 깔끔하지 않은 경우, schemas.py 의 DDL 함수가 `table_name=` 파라미터를 받도록 일반화 (Task 1.1 의 함수 시그니처 확장).
+    schemas.py 의 DDL 함수는 `table_name=` 와 `temporary=False` 파라미터를 받도록 일반화됨 (Task 1.1 의 함수 시그니처 확장).
   - [x] 4.2 `packages/athena-feature-store/athena/feature_store/feature_query.py` 작성:
     ```python
     from __future__ import annotations
@@ -584,24 +590,24 @@ Reviewers: Blind Hunter (diff-only adversarial) / Edge Case Hunter (path tracer)
 - [x] [Review][Defer→Story-1.7] systemd 유닛이 `/home/khuk0/invest_training/...` 절대경로 하드코딩 — repo 이동/UID 변경 시 silent 파손. 근본 해결은 installer 가 `envsubst` 로 unit 템플릿을 렌더하는 패턴 (Story 1.7 Logger PC 설치 패턴과 통합). 현 단일 호스트 고정 경로 사용 중 — deferred [`infra/systemd/athena-logger-sync.service:ExecStart, ExecStopPost`]
 - [x] [Review][Patch] installer 부분 설치 상태 + 비원자 swap — `sudo chown` 실패 시 daemon-reload 전 abort / `sudo cp` 가 running 유닛 파일 덮어씀 / symlink 경로 미해결 / dry-run 이 log 디렉토리 생성 parity 없음 [`scripts/install_logger_sync_unit.sh`]
 - [x] [Review][Patch] `FeatureStore.__init__` 부분 초기화 리소스 누수 — `attach_parquet_views` 예외 시 `self._conn` close 없음 → Windows `.duckdb.wal` 락 잔존 [`packages/athena-feature-store/athena/feature_store/feature_query.py:FeatureStore.__init__`]
-- [ ] [Review][Patch] `test_decisions_db_created_under_parent_dir` Windows 락 경합 플래키 [`tests/integration/test_feature_query_smoke.py`]
+- [x] [Review][Patch] `test_decisions_db_created_under_parent_dir` Windows 락 경합 플래키 — `gc.collect()` + `del fs` 로 lock 해제 후 재오픈 [`tests/integration/test_feature_query_smoke.py`]
 - [x] [Review][Patch] `--tables` 인자 validation 없음 — 부분 export 후 partial-state 로 다음 실행 시 SHARD_ALREADY_EXISTS [`scripts/export_parquet_shard.py:main`]
 - [x] [Review][Patch] `duckdb.IOException` (DB_LOCKED) 예외 처리 없음 — Logger daemon + cron 경합 시 bare traceback [`scripts/export_parquet_shard.py:main`]
 - [x] [Review][Patch] top-level 예외 JSON stderr contract 없음 — disk full / OOM 등 비-shard 예외가 raw traceback 으로 escape → Story 1.9 observability 미스파싱 [`scripts/export_parquet_shard.py:main`]
 - [x] [Review][Dismiss] Prometheus `for: 30s` — 120s threshold + 30s stability = 150s fire 는 60s cadence 의 2회 연속 실패 후 발화 패턴으로 설계 의도된 noise 완충. NFR-O2 SLO 는 "120s lag 가 30s 이상 안정적 초과" 의미 — spec 재정의 불필요 [`infra/prometheus/rules/data_pipeline.rules.yml`]
 - [x] [Review][Patch] systemd timer `Persistent=true` thundering herd + runtime>60s 큐잉 — `RandomizedDelaySec=5s` + `TimeoutStartSec=55s` 추가 [`infra/systemd/athena-logger-sync.timer`, `athena-logger-sync.service`]
-- [ ] [Review][Patch] Decimal overflow 테스트 미검증 — DECIMAL(18,4) 초과값 silent 라운딩 케이스 [`packages/athena-feature-store/tests/test_schemas.py`]
+- [x] [Review][Patch] Decimal overflow 테스트 미검증 — DECIMAL(18,4) 초과값 시 DuckDB 가 `duckdb.Error` 로 reject 함을 assert [`packages/athena-feature-store/tests/test_schemas.py`]
 
 **Patch (MINOR):**
-- [ ] [Review][Patch] `_validate_ident` SQL 예약어 수용 (`interval`, `order` 등 통과) — DuckDB reserved-word list 대조 추가 [`schemas.py:_validate_ident`]
-- [ ] [Review][Patch] partition pruning 테스트 tautology — `"parquet"`/`"filter"` 는 항상 매치; `pruned_files:` 또는 `selected_files:` 로 좁히기 [`tests/integration/test_feature_query_smoke.py`]
-- [ ] [Review][Patch] p95 하드코딩 `[94]` — 샘플 수 변경 시 IndexError; `numpy.percentile(latencies, 95)` 또는 `statistics.quantiles` [`tests/integration/test_feature_query_smoke.py`]
-- [ ] [Review][Patch] `with` context manager docstring 부재 — DuckDB 1.x 에서 동작 확인됐으나 caller 누수 방지 문구 추가 [`packages/athena-feature-store/athena/feature_store/duckdb_client.py`]
-- [ ] [Review][Patch] CLI 테스트가 finally/close 미검증 — subprocess returncode 만 체크 → DuckDB 락/wal 누수 놓침; 동일 path 재오픈 성공 assert [`tests/integration/test_parquet_shard_export.py`]
-- [ ] [Review][Patch] 동시성 메트릭 테스트가 terminal state 만 검증 + `shutil.rmtree(tmp_path)` 안티패턴 [`tests/integration/test_logger_sync_metric.py`]
-- [ ] [Review][Patch] `_empty_<table>` 재생성 불가 (`CREATE TABLE IF NOT EXISTS` 가 스키마 드리프트 시 stale 테이블 유지) — `DROP TABLE IF EXISTS` 선행 또는 `CREATE TEMP TABLE` (P3 와 병합 가능) [`parquet_reader.py:_create_empty_view`]
-- [ ] [Review][Patch] DTO/DDL parity test 가 creator 의 `table_name=` 기본값 변경에 취약 — 명시 인자 전달 [`tests/regression/test_dto_ddl_parity.py`]
-- [ ] [Review][Patch] Dev Agent Record File List 라벨 "(7) tests" 이나 실제 8개 열거 — 문서 오타 (`(8)` 로 수정 또는 `test_dto_ddl_parity.py` 별도 섹션) [본 스토리 파일 File List]
+- [x] [Review][Patch] `_validate_ident` SQL 예약어 수용 (`interval`, `order` 등 통과) — DuckDB reserved-word list 대조 추가 [`schemas.py:_validate_ident`]
+- [x] [Review][Patch] partition pruning 테스트 tautology — `read_parquet` + 파티션 컬럼 이름 참조 assert 로 좁힘 (spec 의 substring-relaxation 허용 범위 내) [`tests/integration/test_feature_query_smoke.py`]
+- [x] [Review][Patch] p95 하드코딩 `[94]` — `statistics.quantiles(..., n=20)[18]` 로 교체 + `_LATENCY_SMOKE_ITERATIONS` 상수화 [`tests/integration/test_feature_query_smoke.py`]
+- [x] [Review][Patch] `with` context manager docstring 부재 — `open_logger_duckdb` / `open_decisions_duckdb` 에 사용 패턴 문서화 [`packages/athena-feature-store/athena/feature_store/duckdb_client.py`]
+- [x] [Review][Patch] CLI 테스트가 finally/close 미검증 — subprocess 완료 후 동일 `--duckdb` path 재오픈 성공 assert 추가 [`tests/integration/test_parquet_shard_export.py`]
+- [x] [Review][Patch] 동시성 메트릭 테스트 `shutil.rmtree(tmp_path)` 안티패턴 제거 — 서브디렉토리로 격리 [`tests/integration/test_logger_sync_metric.py`]
+- [x] [Review][Patch] `_empty_<table>` 재생성 — `DROP TABLE IF EXISTS` 선행으로 schema 드리프트 시 stale TEMP 제거 [`parquet_reader.py:_create_empty_view`]
+- [x] [Review][Patch] DTO/DDL parity test `creator(conn, table_name=...)` 명시 + 타입 드리프트 pin (`DECIMAL(18,4)` / `BIGINT` / `TIMESTAMP WITH TIME ZONE`) [`tests/regression/test_dto_ddl_parity.py`]
+- [x] [Review][Patch] Dev Agent Record File List 라벨 "(7) tests" → "(8) tests" 교정 [본 스토리 파일 File List]
 
 **Defer (code review 2026-04-22):**
 - [x] [Review][Defer] 가상 symbol-less future storage 테이블 시나리오 — 현재 `ticks`/`quotes`/`news` 외 테이블 없음; 본 스토리 범위 밖 [`parquet_shard.py:export_hour_shard`] — deferred, 새 storage 테이블 추가 스토리 (Epic 2+) 에서 회귀
@@ -940,7 +946,7 @@ Task 3.6 (호스트 셋업 SSH key + Logger PC 등록) 은 Logger PC 부재 시 
 - `data/duckdb/.gitkeep`
 - `data/parquet/.gitkeep`
 
-**New tests (7):**
+**New tests (8):**
 - `packages/athena-feature-store/tests/test_schemas.py`
 - `tests/integration/test_parquet_shard_export.py`
 - `tests/integration/test_systemd_unit_files.py`

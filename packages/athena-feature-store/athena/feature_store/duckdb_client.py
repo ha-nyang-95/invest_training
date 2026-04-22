@@ -19,13 +19,26 @@ import duckdb
 
 
 def open_logger_duckdb(path: Path) -> duckdb.DuckDBPyConnection:
-    """Open features_logger.duckdb in RW mode (Logger PC only)."""
+    """Open features_logger.duckdb in RW mode (Logger PC only).
+
+    Use as a context manager (`with open_logger_duckdb(...) as conn:`) or
+    call `.close()` explicitly. DuckDB 1.x holds a .wal lock for the
+    duration of an open connection; on Windows an un-closed connection
+    leaves a stale lock that blocks the next open. The CLI wrapper
+    (`scripts/export_parquet_shard.py`) uses the context-manager form.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     return duckdb.connect(str(path), read_only=False)
 
 
 def open_decisions_duckdb(path: Path) -> duckdb.DuckDBPyConnection:
-    """Open decisions.duckdb in RW mode (Trading PC only)."""
+    """Open decisions.duckdb in RW mode (Trading PC only).
+
+    Use as a context manager or call `.close()` explicitly (see
+    `open_logger_duckdb` docstring for the lock-leak rationale).
+    `FeatureStore.__init__` guards its own attach path with try/except
+    + self._conn.close() for the same reason.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     return duckdb.connect(str(path), read_only=False)
 

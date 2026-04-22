@@ -230,3 +230,38 @@ def test_validate_ident_rejects_reserved_keywords(reserved: str) -> None:
     conn = duckdb.connect(":memory:")
     with pytest.raises(ValueError, match="reserved keyword"):
         create_ticks_table(conn, table_name=reserved)
+
+
+def test_decimal_overflow_is_rejected_by_duckdb() -> None:
+    """Review-flip fix: DECIMAL(18,4) max value is
+    99,999,999,999,999.9999 (14 integer digits + 4 decimal). Attempts to
+    INSERT a value that exceeds this must raise — a silent truncation
+    would corrupt high-price ticks (matters for KRX tickers near 1M KRW
+    where DECIMAL(18,4) already leaves headroom, and matters hard for
+    any future expansion to higher-precision assets).
+
+    Asserts the DuckDB layer flags overflow (via ConversionException or
+    InvalidInputException depending on 1.x sub-version). We do not
+    catch ValidationError from Pydantic here because BaseDTO does not
+    cap Decimal at the DDL precision — the DB is the enforcement point."""
+    overflow_value = Decimal("999999999999999999999.9999")  # 21 int digits — past DECIMAL(18,4)
+    conn = duckdb.connect(":memory:")
+    create_ticks_table(conn)
+    with pytest.raises(duckdb.Error):
+        # Minimal INSERT that exercises only the last_px column type.
+        # Other columns filled with arbitrary valid values.
+        params: list[Any] = [
+            VALID_TS,
+            VALID_MV,
+            VALID_SHA,
+            1,  # user_id
+            "005930",
+        ]
+        # bid/ask_{px,qty}_1..10 = 20 cols
+        for _side in ("bid", "ask"):
+            for _i in range(1, 11):
+                params.append(Decimal("70500.0000"))
+                params.append(100)
+        params += [overflow_value, 100, "B", 1]  # last_px, last_qty, trade_side, seq_no
+        placeholders = ",".join("?" * len(params))
+        conn.execute(f"INSERT INTO ticks VALUES ({placeholders})", params)  # noqa: S608

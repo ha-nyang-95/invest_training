@@ -108,25 +108,45 @@ def test_attach_views_empty_root_creates_empty_view(tmp_path: Path) -> None:
 
 
 def test_partition_pruning_predicate_reaches_plan(parquet_fixture: Path) -> None:
+    """The substring match is intentionally lenient (spec AC-4 allows it for
+    cross-minor-version EXPLAIN phrasing tolerance), but the prior form
+    (`parquet` OR `filter`) was tautological — every parquet-scan EXPLAIN
+    contains "parquet", and every filtered query contains "filter". Require
+    at least `read_parquet` + a reference to the hive-partition column used
+    in the predicate (`year` or `symbol`) so a regression that silently
+    drops hive_partitioning=true gets caught."""
     conn = duckdb.connect(":memory:")
     attach_parquet_views(conn, parquet_fixture)
     plan_rows = conn.execute(
         "EXPLAIN SELECT * FROM ticks WHERE year=2026 AND month=4 AND day=21 AND symbol='005930'"
     ).fetchall()
     plan_text = "\n".join(str(r) for r in plan_rows).lower()
-    # DuckDB 1.x phrasing varies; any hive-partition / filter token is sufficient.
-    assert any(needle in plan_text for needle in ("hive", "parquet", "filter"))
+    assert "read_parquet" in plan_text, f"plan missing parquet scan:\n{plan_text}"
+    # At least one partition-column name must surface in the plan so a
+    # regression that breaks hive extraction (e.g. hive_partitioning=false)
+    # is caught rather than glossed over by the "parquet" substring alone.
+    assert any(col in plan_text for col in ("year", "month", "day", "symbol")), (
+        f"plan lost partition column references:\n{plan_text}"
+    )
+
+
+_LATENCY_SMOKE_ITERATIONS = 100
 
 
 def test_query_latency_smoke_under_100ms(parquet_fixture: Path, tmp_path: Path) -> None:
     fs = FeatureStore(tmp_path / "decisions.duckdb", parquet_fixture)
     latencies: list[float] = []
-    for _ in range(100):
+    for _ in range(_LATENCY_SMOKE_ITERATIONS):
         t0 = time.perf_counter()
         _ = fs.query_recent_ticks("005930", 60)
         latencies.append((time.perf_counter() - t0) * 1000)
     median_ms = statistics.median(latencies)
-    p95_ms = sorted(latencies)[94]
+    # statistics.quantiles(..., n=20) emits 5%-step quantiles; index 18 is
+    # the 95th percentile by nearest-rank. Previously `sorted(latencies)[94]`
+    # was a magic index coupled to the literal `100` iteration count — any
+    # tuning of _LATENCY_SMOKE_ITERATIONS silently shifted the quantile or
+    # triggered IndexError.
+    p95_ms = statistics.quantiles(latencies, n=20)[18]
     print(f"[smoke] median_ms={median_ms:.2f} p95_ms={p95_ms:.2f}")
     fs.close()
     # Smoke bound — real NFR-P4 (p95<500ms) is validated in Story 2.x with full data
@@ -147,11 +167,19 @@ def test_write_stubs_raise_not_implemented(parquet_fixture: Path, tmp_path: Path
 
 
 def test_decisions_db_created_under_parent_dir(parquet_fixture: Path, tmp_path: Path) -> None:
-    # Regression for Path.parent.mkdir handling in open_decisions_duckdb
+    # Regression for Path.parent.mkdir handling in open_decisions_duckdb.
+    # Windows lock-flake mitigation: after fs.close() we force a GC pass
+    # so any lingering DuckDB wrapper objects release their fcntl/WinAPI
+    # locks before the re-open attempt (DuckDB 1.x on Windows is strict
+    # about concurrent connections to the same .duckdb file).
+    import gc
+
     db_path = tmp_path / "nested" / "dir" / "decisions.duckdb"
     fs = FeatureStore(db_path, parquet_fixture)
     assert db_path.exists()
     fs.close()
+    del fs
+    gc.collect()
     # Verify we can re-open after close
     conn = open_decisions_duckdb(db_path)
     conn.close()

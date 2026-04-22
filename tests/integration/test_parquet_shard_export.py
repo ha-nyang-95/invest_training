@@ -328,3 +328,12 @@ def test_cli_smoke_happy_path(
     assert payload["tables"]["quotes"] == 0
     assert payload["tables"]["news"] == 0
     assert payload["bytes"] > 0
+    # Review-flip fix: prove the subprocess left no lock behind. If the CLI's
+    # `with open_logger_duckdb(...) as conn:` finally/__exit__ had leaked
+    # the connection, re-opening RW here would fail on Windows with
+    # IOException; on Linux DuckDB's fcntl lock still leaks an advisory
+    # file, but the reopen succeeds. Either way, catching a failed reopen
+    # pins-down resource cleanup behaviour.
+    db_path = Path(proc.args[4])  # --duckdb argument we passed  # type: ignore[index]
+    reopen = open_logger_duckdb(db_path)
+    reopen.close()

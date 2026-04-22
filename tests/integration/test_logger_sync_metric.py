@@ -8,7 +8,6 @@ rapid consecutive calls.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 import time
@@ -183,9 +182,13 @@ def test_empty_exit_code_records_sentinel_and_exits_zero(tmp_path: Path) -> None
 def test_concurrent_writes_never_leave_torn_file(tmp_path: Path) -> None:
     # node_exporter's textfile scraper polls concurrently — the script writes
     # tmp + replace, so every observed state must be a complete metric set.
-    shutil.rmtree(tmp_path, ignore_errors=True)
-    tmp_path.mkdir(exist_ok=True)
-    out = tmp_path / "concurrent.prom"
+    # Review-flip fix: the earlier form `shutil.rmtree(tmp_path) + mkdir` was
+    # a pytest-xdist anti-pattern (destroys the framework-managed fixture
+    # directory that may hold conftest state on other workers). Use an
+    # isolated subdirectory inside tmp_path instead.
+    work_dir = tmp_path / "concurrent_writes"
+    work_dir.mkdir()
+    out = work_dir / "concurrent.prom"
     _emit(out, exit_code=0, duration=0.0)
 
     def spin() -> None:
