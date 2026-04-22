@@ -41,13 +41,13 @@ gh api -X PUT "repos/${OWNER}/${REPO}/branches/master/protection" \
   "required_status_checks": {
     "strict": true,
     "contexts": [
-      "ci-7-stage / stage-1-pre-commit",
-      "ci-7-stage / stage-2-pytest-unit",
-      "ci-7-stage / stage-3-pytest-integration",
-      "ci-7-stage / stage-4-snapshot-regression",
-      "ci-7-stage / stage-5-walk-forward-smoke",
-      "ci-7-stage / stage-6-cooling-gate",
-      "ci-7-stage / stage-7-paper-replay-marker"
+      "stage-1-pre-commit",
+      "stage-2-pytest-unit",
+      "stage-3-pytest-integration",
+      "stage-4-snapshot-regression",
+      "stage-5-walk-forward-smoke",
+      "stage-6-cooling-gate",
+      "stage-7-paper-replay-marker"
     ]
   },
   "enforce_admins": true,
@@ -66,6 +66,24 @@ EOF
 
 echo "Exporting baseline to infra/github/branch_protection.json ..." >&2
 mkdir -p infra/github
-gh api "repos/${OWNER}/${REPO}/branches/master/protection" | jq '.' \
-  > infra/github/branch_protection.json
+# Use python3 stdlib (jq is not in Ubuntu 24.04 default apt) and strip every
+# `url` / `*_url` key so the baseline is portable across forks and repo renames
+# — drift detection compares policy semantics, not endpoint paths.
+gh api \
+  -H "Accept: application/vnd.github+json" \
+  "repos/${OWNER}/${REPO}/branches/master/protection" \
+  | python3 -c '
+import json, sys
+
+def strip_urls(o):
+    if isinstance(o, dict):
+        return {k: strip_urls(v) for k, v in o.items()
+                if k != "url" and not k.endswith("_url")}
+    if isinstance(o, list):
+        return [strip_urls(x) for x in o]
+    return o
+
+json.dump(strip_urls(json.load(sys.stdin)), sys.stdout, indent=2, sort_keys=True)
+sys.stdout.write("\n")
+' > infra/github/branch_protection.json
 echo "done." >&2
