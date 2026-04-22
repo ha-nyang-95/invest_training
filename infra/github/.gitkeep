@@ -1,0 +1,4 @@
+# Story 1.3 Task 5.4 — infra/github/ baseline directory.
+# scripts/setup_branch_protection.sh writes branch_protection.json here after Khuk0
+# runs the Task 5 gh-api PUT. This .gitkeep lets the directory exist before that
+# export lands so the structure is visible in the initial tree.
