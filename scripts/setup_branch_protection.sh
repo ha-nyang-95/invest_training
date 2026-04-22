@@ -41,13 +41,13 @@ gh api -X PUT "repos/${OWNER}/${REPO}/branches/master/protection" \
   "required_status_checks": {
     "strict": true,
     "contexts": [
-      "ci-7-stage / stage-1-pre-commit",
-      "ci-7-stage / stage-2-pytest-unit",
-      "ci-7-stage / stage-3-pytest-integration",
-      "ci-7-stage / stage-4-snapshot-regression",
-      "ci-7-stage / stage-5-walk-forward-smoke",
-      "ci-7-stage / stage-6-cooling-gate",
-      "ci-7-stage / stage-7-paper-replay-marker"
+      "stage-1-pre-commit",
+      "stage-2-pytest-unit",
+      "stage-3-pytest-integration",
+      "stage-4-snapshot-regression",
+      "stage-5-walk-forward-smoke",
+      "stage-6-cooling-gate",
+      "stage-7-paper-replay-marker"
     ]
   },
   "enforce_admins": true,
@@ -66,6 +66,9 @@ EOF
 
 echo "Exporting baseline to infra/github/branch_protection.json ..." >&2
 mkdir -p infra/github
-gh api "repos/${OWNER}/${REPO}/branches/master/protection" | jq '.' \
+# Use python3 -m json.tool (stdlib) instead of jq so the script stays self-contained
+# on a minimal WSL2 Ubuntu install (jq is not in default apt selections).
+gh api "repos/${OWNER}/${REPO}/branches/master/protection" \
+  | python3 -m json.tool \
   > infra/github/branch_protection.json
 echo "done." >&2
