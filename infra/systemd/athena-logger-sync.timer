@@ -6,11 +6,15 @@ Requires=athena-logger-sync.service
 [Timer]
 # First run 30s after boot (give network time to settle), then every 60s.
 # AccuracySec=5s keeps timer drift bounded without burning a wake-up every second.
-# Persistent=true causes missed fires during downtime to run on next boot.
+# Persistent=true causes missed fires during downtime to run on next boot —
+# RandomizedDelaySec=5s jitters the first fire after boot so a long outage
+# doesn't produce a thundering-herd single rsync of the backlog at the exact
+# same moment across restart-clusters (defensive; single-host today).
 OnBootSec=30s
 OnUnitActiveSec=60s
 AccuracySec=5s
 Persistent=true
+RandomizedDelaySec=5s
 
 [Install]
 WantedBy=timers.target

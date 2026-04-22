@@ -16,7 +16,18 @@ Type=oneshot
 # Trading PC so disk does not grow unbounded; --max-delete=100 caps a runaway
 # purge (if Logger PC ever appears empty, at most 100 files are removed per
 # run, so a full wipe cannot happen silently).
-ExecStart=/usr/bin/rsync -a --partial --partial-dir=.rsync-partial --timeout=30 --bwlimit=0 --delete-after --max-delete=100 logger-pc:/data/parquet/ /data/parquet/
+# --partial-dir=/var/cache/athena/rsync-partial: keeps in-flight rsync tmp
+# files OUTSIDE /data/parquet/ so DuckDB's rglob('*.parquet') cannot pick
+# up mid-transfer truncated bytes (hive-partition namespace pollution).
+# --chown=khuk0:khuk0: rewrites file ownership at write time so a UID
+# mismatch between Logger PC khuk0 and Trading PC khuk0 cannot leave files
+# unreadable by DuckDB (would otherwise surface as silent zero-row reads).
+ExecStart=/usr/bin/rsync -a --partial --partial-dir=/var/cache/athena/rsync-partial --timeout=30 --bwlimit=0 --delete-after --max-delete=100 --chown=khuk0:khuk0 logger-pc:/data/parquet/ /data/parquet/
+# TimeoutStartSec=55s gives a safety margin under the 60s timer cadence:
+# if rsync runtime exceeds 55s the service fails with exit 124 (timeout),
+# next timer fires cleanly. Without this, back-to-back rsync + queued
+# systemd activations could overlap on long transfers.
+TimeoutStartSec=55s
 StandardOutput=append:/var/log/athena/logger-sync.log
 StandardError=append:/var/log/athena/logger-sync.log
 User=khuk0

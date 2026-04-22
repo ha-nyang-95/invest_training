@@ -58,6 +58,34 @@ def test_service_exec_start_has_bounded_delete() -> None:
     assert "--max-delete=" in exec_start
 
 
+def test_service_exec_start_has_chown_and_external_partial_dir() -> None:
+    """Review-flip fix: --chown=khuk0:khuk0 normalises cross-PC UID so
+    DuckDB can always read the files; --partial-dir outside /data/parquet
+    keeps in-flight rsync tmp files off the hive-partition rglob."""
+    cp = _parse_unit(SERVICE_FILE)
+    exec_start = cp.get("Service", "ExecStart")
+    assert "--chown=khuk0:khuk0" in exec_start
+    assert "--partial-dir=/var/cache/athena/rsync-partial" in exec_start
+    # The partial-dir MUST NOT be inside /data/parquet (pollutes rglob)
+    assert "--partial-dir=.rsync-partial" not in exec_start
+
+
+def test_service_timeout_start_sec_under_timer_cadence() -> None:
+    """Review-flip fix: rsync runtime exceeding the 60s timer cadence
+    would queue systemd activations; TimeoutStartSec=55s guarantees the
+    service fails with exit 124 before the next timer fire."""
+    cp = _parse_unit(SERVICE_FILE)
+    assert cp.get("Service", "TimeoutStartSec") == "55s"
+
+
+def test_timer_has_randomized_delay() -> None:
+    """Review-flip fix: RandomizedDelaySec jitters the first post-boot
+    fire so a cluster-wide outage does not produce a synchronised
+    thundering-herd rsync at exactly the same moment."""
+    cp = _parse_unit(TIMER_FILE)
+    assert cp.get("Timer", "RandomizedDelaySec") == "5s"
+
+
 def test_service_emits_metric_from_exec_stop_post_not_start_post() -> None:
     """Review-flip fix: $EXIT_STATUS is populated by systemd ONLY in
     ExecStopPost= (systemd.service(5)). ExecStartPost= leaves the variable

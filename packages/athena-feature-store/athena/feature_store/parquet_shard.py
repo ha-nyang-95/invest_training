@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -31,6 +32,31 @@ import polars as pl
 from pydantic import BaseModel, ConfigDict
 
 _SYMBOL_NULL_SENTINEL = "__NULL__"
+# Legal symbol character class — conservative. KRX tickers are 6-digit numeric
+# today, but accepting alnum + `_` + `-` covers future cross-market expansion
+# without permitting filesystem-hostile bytes (`/`, `\`, `:`, NUL, path
+# separators, glob metacharacters). Length cap 32 prevents pathological
+# filename blowup.
+_SYMBOL_VALID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,32}$")
+
+
+def _validate_symbol(sym: str) -> None:
+    """Reject symbols that would collide with the NULL sentinel or produce
+    unsafe filesystem paths. Runs per-export on every unique symbol in the
+    hour's dataset — upstream DTO validation (NOT NULL, min_length=1) guards
+    against NULL/empty, but does not bound characters."""
+    if sym == _SYMBOL_NULL_SENTINEL:
+        raise ValueError(
+            f"Symbol literal collides with NULL sentinel {_SYMBOL_NULL_SENTINEL!r}; "
+            "adversarial row or mis-configured DTO"
+        )
+    if not _SYMBOL_VALID_RE.match(sym):
+        raise ValueError(
+            f"Symbol contains unsupported characters: {sym!r}; "
+            f"allowed pattern {_SYMBOL_VALID_RE.pattern}"
+        )
+
+
 _TIME_COL: dict[str, str] = {
     "ticks": "timestamp",
     "quotes": "timestamp",
@@ -180,7 +206,11 @@ def export_hour_shard(
         )
         if sub_df.is_empty():
             continue
-        part_sym = _SYMBOL_NULL_SENTINEL if sym_value is None else str(sym_value)
+        if sym_value is None:
+            part_sym = _SYMBOL_NULL_SENTINEL
+        else:
+            part_sym = str(sym_value)
+            _validate_symbol(part_sym)
         out_file = partition_dir / f"symbol={part_sym}.parquet"
 
         if out_file.exists():

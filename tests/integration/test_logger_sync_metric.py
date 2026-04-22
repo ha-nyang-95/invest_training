@@ -91,6 +91,66 @@ def test_missing_output_dir_auto_created(tmp_path: Path) -> None:
     assert out.exists()
 
 
+def test_nan_duration_renders_as_zero(tmp_path: Path) -> None:
+    """Review-flip fix: NaN/inf would render literally as `nan`/`inf` and
+    node_exporter's textfile scraper rejects the entire file on parse
+    failure — silently dropping all 3 gauges. Clamp to 0.0 keeps the file
+    valid."""
+    out = tmp_path / "nan.prom"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--exit-code",
+            "0",
+            "--duration",
+            "nan",
+            "--output",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert proc.returncode == 0, f"stderr={proc.stderr!r}"
+    # File parses — duration gauge reads as 0.0
+    assert _parse_metric(out, "athena_logger_sync_duration_seconds") == 0.0
+
+
+def test_orphan_tmp_files_are_swept(tmp_path: Path) -> None:
+    """Review-flip fix: a crashed prior emitter leaves `.<pid>.tmp` files
+    behind. Without a sweep, the textfile collector dir fills over months.
+    The sweep is mtime-guarded (300s) so it cannot unlink an in-flight
+    concurrent emitter's tmp — we age the fixture past that threshold."""
+    import os as _os
+
+    out = tmp_path / "m.prom"
+    # Plant a stale tmp that looks like our format, aged past 5 minutes
+    stale = tmp_path / "m.prom.99999.tmp"
+    stale.write_text("stale-garbage", encoding="utf-8")
+    old = time.time() - 600  # 10 min ago — comfortably past the 300s threshold
+    _os.utime(stale, (old, old))
+    assert stale.exists()
+    # Normal emit should sweep it (fresh tmp goes through + stale gets unlinked)
+    _emit(out, exit_code=0, duration=0.0)
+    assert not stale.exists(), "orphan .tmp file was not swept"
+
+
+def test_recent_tmp_files_are_not_swept(tmp_path: Path) -> None:
+    """Contract regression: tmp files younger than 300s must NOT be
+    unlinked — a concurrent emitter mid-write would otherwise lose its
+    tmp and crash on replace()."""
+    out = tmp_path / "m.prom"
+    recent = tmp_path / "m.prom.88888.tmp"
+    recent.write_text("in-flight from another emitter", encoding="utf-8")
+    # Fresh mtime (just now) — sweep should skip
+    _emit(out, exit_code=0, duration=0.0)
+    assert recent.exists(), "in-flight tmp was unsafely unlinked"
+    # cleanup
+    recent.unlink()
+
+
 def test_empty_exit_code_records_sentinel_and_exits_zero(tmp_path: Path) -> None:
     """Review-flip fix: when systemd expands $EXIT_STATUS in a context where
     the variable is unset (historical ExecStartPost= misuse, manual

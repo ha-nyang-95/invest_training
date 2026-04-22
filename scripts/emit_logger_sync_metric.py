@@ -17,6 +17,7 @@ to update last_success_seconds.
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import time
 from pathlib import Path
@@ -47,13 +48,53 @@ def _read_prev_last_success(path: Path) -> int:
     try:
         for line in path.read_text(encoding="utf-8").splitlines():
             if line.startswith(_PREV_SUCCESS_PREFIX):
-                return int(line.split()[1])
+                # `int(float(...))` tolerates prior values written in float or
+                # scientific notation (unlikely but plausible if a future
+                # version emits `time()` directly without rounding); bare
+                # `int()` would have crashed and reset last_success to 0,
+                # firing LoggerSyncLagHigh immediately after the format drift.
+                return int(float(line.split()[1]))
     except (OSError, ValueError):
         return 0
     return 0
 
 
+def _sanitise_duration(duration: float) -> float:
+    """NaN/inf would render as `nan`/`inf` in the Prometheus text format,
+    which node_exporter's textfile scraper rejects — silently dropping ALL
+    three gauges for that scrape. Clamp to 0.0 so the metric file stays
+    valid even if a buggy caller passes garbage."""
+    return 0.0 if not math.isfinite(duration) else duration
+
+
+_STALE_TMP_AGE_SECONDS = 300  # 5 min — long enough that any in-flight emit finished.
+
+
+def _sweep_stale_tmp_files(target: Path) -> None:
+    """Orphan `.<pid>.tmp` files accumulate when a prior emitter crashed
+    between write_text() and replace(). Without a sweep, the textfile
+    collector directory grows unbounded over months on the Trading PC.
+
+    mtime-guarded: only files older than 5 minutes are removed, so an
+    in-flight concurrent emitter's tmp is never unlinked mid-flight.
+    """
+    parent = target.parent
+    if not parent.exists():
+        return
+    suffix_glob = f"{target.stem}{target.suffix}.*.tmp"
+    now = time.time()
+    for stale in parent.glob(suffix_glob):
+        try:
+            if now - stale.stat().st_mtime < _STALE_TMP_AGE_SECONDS:
+                continue
+            stale.unlink()
+        except OSError:
+            # Another emitter may be mid-rename — leave the file alone.
+            pass
+
+
 def _render_body(last_success: int, exit_code: int, duration: float) -> str:
+    safe_duration = _sanitise_duration(duration)
     return (
         "# HELP athena_logger_sync_last_success_seconds Unix timestamp of last successful rsync.\n"
         "# TYPE athena_logger_sync_last_success_seconds gauge\n"
@@ -63,7 +104,7 @@ def _render_body(last_success: int, exit_code: int, duration: float) -> str:
         f"athena_logger_sync_last_exit_code {exit_code}\n"
         "# HELP athena_logger_sync_duration_seconds Last rsync duration.\n"
         "# TYPE athena_logger_sync_duration_seconds gauge\n"
-        f"athena_logger_sync_duration_seconds {duration}\n"
+        f"athena_logger_sync_duration_seconds {safe_duration}\n"
     )
 
 
@@ -80,6 +121,7 @@ def main() -> int:
     last_success = now_unix if is_success else prev_last_success
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
+    _sweep_stale_tmp_files(args.output)
     body = _render_body(last_success, args.exit_code, args.duration)
     # Atomic write: node_exporter textfile scraper runs concurrently and must
     # never observe a half-written file. Rename is atomic on the same filesystem.

@@ -28,11 +28,78 @@ from athena.core.dto import BaseDTO
 from pydantic import Field, field_validator
 
 _IDENT_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+# Partial DuckDB/SQL-standard reserved-word set. Accepting these as bare
+# (unquoted) table names compiles today but produces confusing SQL errors on
+# subsequent queries (`SELECT * FROM interval` parses `interval` as a type
+# keyword). Rejecting at the validator layer prevents the class of bugs
+# entirely. Case-insensitive match — caller passes lower/upper as they like.
+_RESERVED_IDENTS = frozenset(
+    {
+        "select",
+        "from",
+        "where",
+        "order",
+        "group",
+        "by",
+        "having",
+        "as",
+        "join",
+        "on",
+        "union",
+        "insert",
+        "update",
+        "delete",
+        "into",
+        "values",
+        "set",
+        "table",
+        "column",
+        "index",
+        "view",
+        "with",
+        "case",
+        "when",
+        "then",
+        "else",
+        "end",
+        "limit",
+        "offset",
+        "null",
+        "not",
+        "and",
+        "or",
+        "like",
+        "in",
+        "exists",
+        "between",
+        "is",
+        "primary",
+        "key",
+        "foreign",
+        "default",
+        "check",
+        "unique",
+        "interval",
+        "timestamp",
+        "date",
+        "time",
+        "true",
+        "false",
+        "user",
+        "current_date",
+        "current_time",
+    }
+)
 
 
 def _validate_ident(name: str) -> None:
     if not _IDENT_PATTERN.match(name):
         raise ValueError(f"Invalid SQL identifier: {name!r}; expected [a-zA-Z_][a-zA-Z0-9_]*")
+    if name.lower() in _RESERVED_IDENTS:
+        raise ValueError(
+            f"SQL reserved keyword cannot be used as table name: {name!r} "
+            f"(would produce ambiguous bare-identifier SQL; quote it or rename)"
+        )
 
 
 # ─── DTOs — single source of truth for column names & Python-side types ───────

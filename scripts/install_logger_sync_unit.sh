@@ -7,7 +7,9 @@ set -euo pipefail
 
 DRY_RUN=${DRY_RUN:-0}
 UNIT_DIR=/etc/systemd/system
-SRC="$(cd "$(dirname "$0")/../infra/systemd" && pwd)"
+# readlink -f resolves symlinked invocations (e.g. /usr/local/bin/install_logger_sync_unit.sh
+# → repo script) so SRC always points at the actual repo's infra/systemd.
+SRC="$(cd "$(dirname "$(readlink -f "$0")")/../infra/systemd" && pwd)"
 
 install_unit() {
   local f="$1"
@@ -15,8 +17,10 @@ install_unit() {
     echo "[dry-run] would copy $SRC/$f -> $UNIT_DIR/$f"
     return
   fi
-  sudo cp "$SRC/$f" "$UNIT_DIR/$f"
-  sudo chmod 644 "$UNIT_DIR/$f"
+  # `install` performs atomic replace (write-to-tmp + rename) with one
+  # command — unlike `cp`, a concurrent `daemon-reload` cannot observe a
+  # partially-rewritten unit file. 644 = world-readable, owner-writable.
+  sudo install -m 644 "$SRC/$f" "$UNIT_DIR/$f"
 }
 
 install_unit athena-logger-sync.service
@@ -28,8 +32,15 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
-sudo mkdir -p /var/log/athena
-sudo chown khuk0:khuk0 /var/log/athena
+# `install -d` is idempotent: creates the directory if missing with the
+# given ownership in one call. Separating mkdir + chown (the prior form)
+# left a window where mkdir succeeded but chown failed on a pre-existing
+# directory owned by another user — with `set -e`, the script then aborted
+# AFTER the unit copy but BEFORE daemon-reload, producing a half-installed
+# state. /var/cache/athena/rsync-partial holds in-flight rsync tmp files
+# outside the parquet tree so DuckDB's rglob cannot read them mid-transfer.
+sudo install -d -o khuk0 -g khuk0 -m 755 /var/log/athena
+sudo install -d -o khuk0 -g khuk0 -m 755 /var/cache/athena/rsync-partial
 sudo systemctl daemon-reload
 sudo systemctl enable --now athena-logger-sync.timer
 systemctl status athena-logger-sync.timer --no-pager

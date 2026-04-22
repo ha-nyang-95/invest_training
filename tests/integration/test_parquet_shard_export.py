@@ -191,6 +191,21 @@ def test_naive_hour_rejected(
         export_hour_shard(conn, "ticks", naive_hour, out_root)
 
 
+def test_symbol_validation_rejects_path_hostile_and_null_sentinel(tmp_path: Path) -> None:
+    """Review-flip fix: a symbol containing `/`, `\\`, `:`, or the literal
+    `__NULL__` sentinel used to land as a filesystem path segment —
+    producing path traversal or collision with the NULL partition. Validate
+    at export time before touching the filesystem."""
+    from athena.feature_store.parquet_shard import _validate_symbol
+
+    for bad in ("__NULL__", "a/b", "a\\b", "a:b", "a b", "x" * 40, ""):
+        with pytest.raises(ValueError):
+            _validate_symbol(bad)
+    # Legal shapes pass
+    for ok in ("005930", "AAPL", "XYZ-1", "x_y"):
+        _validate_symbol(ok)
+
+
 def test_write_leaves_no_tmp_file(
     logger_db_with_ticks: tuple[duckdb.DuckDBPyConnection, Path],
 ) -> None:
@@ -203,6 +218,78 @@ def test_write_leaves_no_tmp_file(
     part_dir = out_root / "ticks/year=2026/month=04/day=21/hour=09"
     tmp_leftovers = list(part_dir.glob("*.tmp.*"))
     assert not tmp_leftovers, f"atomic rename left residue: {tmp_leftovers}"
+
+
+def _run_cli(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "scripts/export_parquet_shard.py", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=cwd,
+        check=False,
+    )
+
+
+def test_cli_rejects_bad_hour_spec(tmp_path: Path) -> None:
+    """Review-flip fix: `now--5`, `now-0`, `YYYY-MM-DD HH` (space, no T), and
+    pure garbage all used to either silently produce a future hour, a
+    partial hour, or a bare traceback. Now all map to a SHARD_BAD_HOUR
+    JSON contract with exit 2."""
+    db = tmp_path / "empty.duckdb"
+    conn = open_logger_duckdb(db)
+    create_ticks_table(conn)
+    conn.close()
+    repo_root = Path(__file__).resolve().parents[2]
+    for bad in ("now-0", "now--5", "now-abc", "2026-04-21 09", "notadate"):
+        proc = _run_cli(
+            [
+                "--duckdb",
+                str(db),
+                "--out-root",
+                str(tmp_path / "parquet"),
+                "--hour",
+                bad,
+            ],
+            cwd=repo_root,
+        )
+        assert proc.returncode == 2, f"{bad!r} should SHARD_BAD_HOUR; got {proc.returncode}"
+        payload = json.loads(proc.stderr.strip().splitlines()[-1])
+        assert payload["error_code"] == "SHARD_BAD_HOUR"
+
+
+def test_cli_rejects_invalid_tables(
+    logger_db_with_ticks: tuple[duckdb.DuckDBPyConnection, Path],
+) -> None:
+    """Review-flip fix: `--tables invalid,ticks` used to export ticks then
+    crash on `invalid`, leaving a partial-state ticks shard that blocked
+    the next retry with SHARD_ALREADY_EXISTS. All table names are now
+    validated up-front (before DuckDB is opened)."""
+    conn, out_root = logger_db_with_ticks
+    db_path = Path(conn.execute("PRAGMA database_list").fetchone()[2])  # type: ignore[index]
+    conn.close()
+    repo_root = Path(__file__).resolve().parents[2]
+    proc = _run_cli(
+        [
+            "--duckdb",
+            str(db_path),
+            "--out-root",
+            str(out_root),
+            "--hour",
+            "2026-04-21T09",
+            "--tables",
+            "invalid,ticks",
+        ],
+        cwd=repo_root,
+    )
+    assert proc.returncode == 2
+    payload = json.loads(proc.stderr.strip().splitlines()[-1])
+    assert payload["error_code"] == "SHARD_BAD_TABLES"
+    assert payload["invalid"] == ["invalid"]
+    # And crucially no partial write: ticks shard should NOT exist
+    assert not list(
+        (out_root / "ticks").rglob("*.parquet") if (out_root / "ticks").exists() else []
+    )
 
 
 def test_cli_smoke_happy_path(

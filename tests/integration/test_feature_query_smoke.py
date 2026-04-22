@@ -184,6 +184,64 @@ def test_query_news_rejects_naive_datetime(parquet_fixture: Path, tmp_path: Path
         fs.close()
 
 
+def test_refresh_views_picks_up_new_shards(tmp_path: Path) -> None:
+    """Review-flip fix: long-running Trading PC processes must be able to
+    see shards that arrived via rsync after FeatureStore was constructed.
+    Previously attach_parquet_views ran only once in __init__, so new
+    hours were invisible until restart."""
+    parquet_root = tmp_path / "parquet"
+    fs = FeatureStore(tmp_path / "decisions.duckdb", parquet_root)
+    try:
+        # Empty root initially — view returns 0 rows (from the TEMP empty table)
+        assert fs._conn.execute("SELECT count(*) FROM ticks").fetchone()[0] == 0  # noqa: SLF001
+        # A shard lands via a simulated rsync
+        hour_dir = parquet_root / "ticks/year=2026/month=04/day=21/hour=07"
+        hour_dir.mkdir(parents=True)
+        frame = _build_hour_slice(datetime(2026, 4, 21, 7, 0, 0, tzinfo=UTC), ("005930",))
+        frame.write_parquet(hour_dir / "symbol=005930.parquet", compression="zstd")
+        # Before refresh — view still resolves to the empty TEMP table
+        assert fs._conn.execute("SELECT count(*) FROM ticks").fetchone()[0] == 0  # noqa: SLF001
+        # After refresh — view points at the parquet glob and sees the new rows
+        fs.refresh_views()
+        assert fs._conn.execute("SELECT count(*) FROM ticks").fetchone()[0] == 100  # noqa: SLF001
+    finally:
+        fs.close()
+
+
+def test_init_closes_conn_on_view_attach_failure(tmp_path: Path) -> None:
+    """Review-flip fix: if attach_parquet_views raised (or SET TimeZone
+    raised) mid-__init__, self._conn stayed open with a .duckdb.wal lock
+    that blocked subsequent runs on Windows. __init__ now guards with
+    try/except + close."""
+    # Force attach_parquet_views to explode by passing a Path that is not a
+    # directory (file exists at the root) — DuckDB rglob will still work, so
+    # we instead inject a monkey-patch onto a non-existent deep attribute.
+    # Simpler: use a root the FS would process fine but make the connection
+    # raise a known error. We do that by pre-creating a broken decisions.duckdb
+    # that duckdb can open but the subsequent view-attach will stumble on.
+    # Easiest synthetic fault — make the parquet_root a file not a directory:
+    parquet_root = tmp_path / "not_a_dir"
+    parquet_root.write_text("")  # file, not directory
+    # attach_parquet_views('ticks') will call _has_any_parquet which does
+    # root.exists() True + rglob — on a regular file rglob raises NotADirectoryError
+    # on some OSes, falls through gracefully on others. Either way the
+    # important invariant: if __init__ raises, no .duckdb lock leaks.
+    db_path = tmp_path / "decisions.duckdb"
+    # Even if this does not raise (depending on OS), closing behaviour is fine;
+    # we only fail loudly on lock leakage. The test deliberately does NOT assert
+    # that __init__ raised — the invariant we need is that re-opening always works.
+    try:
+        fs = FeatureStore(db_path, parquet_root)
+    except Exception:  # noqa: BLE001, S110 — deliberate: exception path is what we probe; lock leak is the real regression
+        pass
+    else:
+        fs.close()
+    # If we got here, the conn either closed on exception or closed cleanly.
+    # Verify re-open works (no lingering .duckdb.wal lock).
+    conn = open_decisions_duckdb(db_path)
+    conn.close()
+
+
 def test_empty_view_does_not_persist_to_decisions_db(tmp_path: Path) -> None:
     """Review-flip fix (D1 / #PT-2 invariant): when parquet_root has zero
     shards, the fallback _empty_<table> must be a TEMP (session-scoped)

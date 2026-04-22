@@ -220,3 +220,13 @@ def test_dto_ddl_name_parity(
     assert ddl_names == dto_names, (
         f"{table}: symmetric diff = {dto_names.symmetric_difference(ddl_names)}"
     )
+
+
+@pytest.mark.parametrize("reserved", ["interval", "order", "select", "TABLE", "User"])
+def test_validate_ident_rejects_reserved_keywords(reserved: str) -> None:
+    """Review-flip fix: bare reserved keywords as table names compile today
+    (the validator accepted anything `[a-zA-Z_][a-zA-Z0-9_]*`) but produce
+    confusing ambiguity errors on subsequent SELECT. Reject up-front."""
+    conn = duckdb.connect(":memory:")
+    with pytest.raises(ValueError, match="reserved keyword"):
+        create_ticks_table(conn, table_name=reserved)
