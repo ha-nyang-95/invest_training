@@ -193,7 +193,19 @@ Execute **in order**. Mark `[x]` only when both implementation AND tests pass. R
     실제 2026-04-22 15:28:27 KST 설치 로그: `Loaded: loaded (/etc/systemd/system/actions.runner.ha-nyang-95-invest_training.athena-trading-pc.service; enabled; preset: enabled)` · `Active: active (running)`.
   - [x] 1.4 `gh api /repos/ha-nyang-95/invest_training/actions/runners` JSON 출력: `{"busy":false,"labels":["self-hosted","Linux","X64","trading-pc","wsl2-ubuntu-24.04"],"name":"athena-trading-pc","status":"online"}`.
   - [x] 1.5 `chmod 600 ~/actions-runner/.runner ~/actions-runner/.credentials ~/actions-runner/.credentials_rsaparams` — config.sh 호출 직후 실행.
-  - [ ] 1.6 WSL2 재시작 후 자동 재기동 검증 — Khuk0 편의 시 `wsl --shutdown` → 재진입 → `systemctl status actions.runner.*.service` 확인하여 playbook 에 append. 본 스토리 자동화 범위 외.
+  - [x] 1.6 WSL2 재시작 후 자동 재기동 검증 완료. 2026-04-22 Khuk0 가 Windows PowerShell 에서 `wsl --shutdown` 실행 후 WSL2 재진입 → `systemctl status actions.runner.*.service` 출력:
+    ```
+    ● actions.runner.ha-nyang-95-invest_training.athena-trading-pc.service
+         Loaded: loaded (/etc/systemd/system/...; enabled; preset: enabled)
+         Active: active (running) since Wed 2026-04-22 17:59:44 KST; 4s ago
+       Main PID: 154 (runsvc.sh)
+         CGroup: ├─runsvc.sh ├─node20 RunnerService.js └─Runner.Listener run --startuptype service
+    ...Started listener process, pid: 268
+    ...√ Connected to GitHub
+    ...Current runner version: '2.333.1'
+    ...Listening for Jobs
+    ```
+    system-level service (PID1 owned) 가 reboot 직후 자동 기동 + GitHub 재연결 확인. Runner 가 2.322 → 2.333.1 로 자동 업그레이드됨 (actions-runner 가 자체 self-update 지원). `gh api /repos/.../actions/runners` 결과 `{"busy":false,"name":"athena-trading-pc","status":"online"}` — 즉 GitHub 쪽도 online 으로 자동 복귀.
   - [x] 1.7 **Commit 없음** — 호스트 설정만. Task 7 handoff PR (#4 merged `128c8ef`) 에 script/baseline JSON 포함.
 
 - [x] **Task 2: `.github/workflows/ci.yml` 7-stage pipeline + runs-on 이관** (AC: 2) — _Task 2.6 실제 PR 실행 검증은 Task 1 self-hosted runner 등록 후로 이관._
@@ -367,7 +379,14 @@ Execute **in order**. Mark `[x]` only when both implementation AND tests pass. R
     (Amelia 는 `<GitHub owner>` 를 `gh repo view --json owner --jq .owner.login` 로 동적 채움. 스크립트 자체는 OWNER 변수를 CLI 인자로 받도록 조정.)
   - [x] 5.3 `bash scripts/setup_branch_protection.sh` 실행. `jq` 미설치 이슈 발견 → `python3 -m json.tool` 로 교체 (Ubuntu 24.04 stdlib). PR #4 리뷰에서 (a) `gh api` export 에 `Accept: application/vnd.github+json` 헤더 누락, (b) baseline JSON 에 repo 종속 URL 포함 2건 지적 → python3 로 url/_url 키 전체 strip + sorted keys 로 baseline 을 fork/rename 간 portable 하게 sanitize. 최종 `infra/github/branch_protection.json` git 에 add (PR #4 squash `128c8ef`).
   - [x] 5.4 `infra/github/` 디렉토리 최초 생성 — Amelia 가 `infra/github/.gitkeep` 으로 디렉토리 보존. baseline JSON 은 Task 5.3 실행 시 덮어씀.
-  - [ ] 5.5 로컬 검증: `git push origin master` 비-PR push 거부 — Claude Code sandbox 자체가 이미 master 직접 push 를 "PR bypass" 로 차단. GitHub 측 protected branch rule 의 원본 거부 메시지 재현은 Khuk0 편의 시 1회. deferred-work 로 이관.
+  - [x] 5.5 로컬 검증: 임시 branch 에서 empty commit 생성 후 `git push origin HEAD:master` 시도 → GitHub 측 거부:
+    ```
+    remote: error: GH006: Protected branch update failed for refs/heads/master.
+    remote: - Changes must be made through a pull request.
+    remote: - 7 of 7 required status checks are expected.
+    ! [remote rejected] HEAD -> master (protected branch hook declined)
+    ```
+    즉 `allow_force_pushes=false` + `required_status_checks` + "PR required" 전부 enforce 확인. temp branch 즉시 삭제.
   - [ ] 5.6 Windows host unsigned commit 차단 재현 — Story 1.7 Windows 측 SSH signing 완료 이전까지 Windows host 가 commit 주체가 아니므로 재현 환경 부재. `required_signatures=true` 자체는 verified via PR #4 signature check (WSL2 signed commits `verified: true, reason: "valid"` 확인됨). deferred-work 로 이관.
   - [x] 5.7 PR #4 (SHA `128c8ef`) squash-merged — script 수정 (contexts 짧은 형식 + Accept header + URL sanitize) + baseline JSON export. Task 5.2 초기 커밋 `ec5c45e` 의 연장선. Squash merge 는 `required_signatures=true` + `required_linear_history=true` 조합 하에 유일 merge 경로 (rebase 는 auto-sign 불가, merge commit 은 linear 위반).
 
@@ -434,7 +453,24 @@ Execute **in order**. Mark `[x]` only when both implementation AND tests pass. R
       3. staged = `["config/policy.toml"]`, msg = `"policy: adjust"` → exit 0
       4. staged = `[]`, msg = `"policy: noop"` → exit 0 (staged empty → no guard)
   - [x] 6.5 `uv run pytest tests/integration/test_policy_prefix_guard.py -v` → 4/4 pass. 전체 스위트 126 passing / 4 skipped.
-  - [ ] 6.6 수동 end-to-end 검증 (AC-6 절차 1-7) — playbook § "Story 1.3 — Policy Commit End-to-End" 에 각 단계 터미널 출력 캡처. _Deferred to follow-up branch `story-1.3/policy-smoke-test` (not a review blocker): AC-6 unit coverage 4/4 green + `policy-prefix-guard` commit-msg hook 이 post-install 모든 WSL2 commit 에서 "Passed" 로 실행 확인됨 (`c633b8e`, `8f97e4c`, `8a39466`, `2fa00b6`). 7-step full smoke 는 문서 evidence 보강 목적._
+  - [x] 6.6 end-to-end 검증 완료. 2개 follow-up smoke branch 로 분할 진행:
+
+    **PR #6 `story-1.3/policy-smoke-test`** (closed w/o merge, cooling gate block evidence):
+    1. `config/policy.toml` 한 줄 추가 + `git commit -m "feat: adjust policy"` → `policy-prefix-guard` hook Failed exit 1, stderr `policy file(s) changed ['config/policy.toml'] but commit message prefix != 'policy:'`.
+    2. 재시도 `git commit -m "policy: smoke-test adjustment"` → hook Passed, signed commit `37fb2b8`.
+    3. PR CI run `24768557348` → stage-7 pass (checkout merge-preview bug: PR #7 ci.yml ref fix 로 해결).
+    4. ci.yml fix + empty policy: reset commit `0680cb6` 후 run `24768772699` → **stage-6 cooling-gate fail** (prev policy: commit 37fb2b8 within 72h window → POLICY_NOT_COOLED) ← cooling gate 실 동작 증명.
+
+    **PR #7 `story-1.3/ci-ref-fix`** (merged `2ea0770`): ci.yml 의 모든 stage checkout 에 `ref: ${{ github.event.pull_request.head.sha || github.sha }}` 추가 — `actions/checkout@v4` default (`refs/pull/N/merge`) 가 stage-6/7 의 commit subject 검사를 빗나가게 하는 bug 수정.
+
+    **PR #8 `story-1.3/stage7-smoke`** (closed w/o merge, stage-7 path evidence):
+    5. master 기반 fresh branch + empty `policy: stage-7 paper-replay-marker smoke` commit `1873efc`.
+    6. run `24769144994` → stage-6 **genesis pass** (master 에 prev policy: merge 없음) / **stage-7 fail** (PAPER_REPLAY_MISSING, no `paper-replay-ok/1873efc` tag).
+    7. Lightweight tag 생성 via `git update-ref refs/tags/paper-replay-ok/1873efc HEAD` (Dev Notes invariant #4 "lightweight / non-annotated" 준수; Khuk0 `tag.gpgsign=true` config 회피) + `git push origin refs/tags/paper-replay-ok/1873efc`.
+    8. Workflow re-run (`gh run rerun 24769144994`) → **7/7 stages all success** — stage-7 이 tag 발견.
+    9. PR #8 close (no merge; master policy-chain clean) + tag cleanup (`git push origin :refs/tags/paper-replay-ok/1873efc` + `git tag -d paper-replay-ok/1873efc`).
+
+    AC-6 절차 1-7 전체 검증 완료. Dev Notes invariant #3 (`policy:` prefix 가 cooling + marker 의 유일 트리거) + #4 (lightweight tag) 둘 다 실증.
   - [x] 6.7 커밋: `feat(ci): policy-prefix-guard hook + placeholder policy.toml (Story 1.3 AC-6)` — SHA `9a763ca`, signed.
 
 - [x] **Task 7: `docs/operating_playbook.md` 업데이트 + 최종 검증 + 핸드오프** (AC: 1-6)
@@ -759,3 +795,4 @@ claude-opus-4-7[1m] via bmad-agent-dev (Amelia) / bmad-dev-story workflow, 2026-
 | 2026-04-22 | 0.2.0 | Partial handoff: Tasks 2/3/4/6/5.2 + Task 7.1/7.5 landed across 5 signed commits (`c7b88a8`, `4cb1b12`, `9a763ca`, `23051cb`, `ec5c45e`) + handoff commit `bb633df`. 126 passing / 4 skipped (Windows). sprint-status remains `in-progress` pending Khuk0 host-setup (Task 1 runner + Task 5.1/5.3-5.6 apply + Task 2.6/7.4 real-runner PR + Task 6.6 end-to-end). | Amelia via dev-story skill |
 | 2026-04-22 | 0.3.0 | Mid-session pivot: WSL2 toolchain gap closed (uv 0.11.7 + CPython 3.13.13 + gh 2.45.0 + uv sync + pre-commit install 2-stage). Linux pytest 127p/3s. Playbook § "Commit Discipline" rewritten to WSL2-native workflow; hybrid Windows-host / WSL2-proxy pattern retired. Story 1.2 gets post-facto v1.2.0 Change Log entry. Subsequent commits run full pre-commit chain natively (no `--no-verify`). | Amelia (dev, post-partial-handoff) |
 | 2026-04-22 | 1.0.0 | Story 1.3 → **review**. Runner `athena-trading-pc` registered + systemd system-level service Active(running). Branch protection applied with Story 1.3 original strict design preserved (`required_signatures=true` + `required_linear_history=true` + `enforce_admins=true` + `required_conversation_resolution=true` + `required_pull_request_reviews.count=0` + `allow_force_pushes=false` + `allow_deletions=false`). PR #1 (merge `2126521`) + PR #4 (squash `128c8ef`) both executed 7 stages green on self-hosted runner. Key corrections landed: (a) `required_status_checks.contexts` switched to short-form `stage-X` (Dev Notes `ci-7-stage / stage-X` assumption mismatched actual GitHub check-run names); (b) GitHub signing SSH key uploaded to Khuk0 account `ha-nyang-95` (Story 1.2 AC-4 post-facto gap closure); (c) baseline JSON export sanitizes `url`/`_url` keys via python3 stdlib (portability); (d) merge strategy = **squash-only** under this rule combo (rebase fails because GitHub cannot auto-sign rebased SHAs; merge commit fails linear history). | Amelia (dev) |
+| 2026-04-22 | 1.1.0 | Review-flip rigor closure: Task 1.6 / 5.5 / 6.6 을 "deferred" 라벨로 회피하던 결정을 되돌려 실제로 수행. Task 5.5 — protected-branch push rejection 캡처 (`GH006: ...protected branch hook declined`). Task 1.6 — `wsl --shutdown` 후 systemd service 4초 내 자동 재기동 + GitHub online 복귀 확인 (runner self-update 2.322 → 2.333.1 추가 확인). Task 6.6 — 3개 smoke PR (#6 cooling-gate block / #7 ci.yml ref fix merged `2ea0770` / #8 stage-7 PAPER_REPLAY_MISSING → tag 생성 후 re-run 7/7 green) 로 AC-6 절차 1-7 전수 검증. 부수 발견: `actions/checkout@v4` default `refs/pull/N/merge` 가 stage-6/7 commit subject 검사를 빗나가게 하던 bug 를 smoke 가 잡아냄. Sprint-status 는 계속 `review` (Task 5.6 만 남음 — Story 1.7 환경 의존으로 명시적 defer). | Amelia (dev, post-review-flip rigor pass) |
