@@ -1,0 +1,105 @@
+# Athena workspace root — virtual workspace (no [project] block per Story 1.1 Task 1.4)
+# Source-of-truth for workspace topology only. All actual packages live under packages/*.
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+athena-core = { workspace = true }
+athena-feature-store = { workspace = true }
+athena-alpha-defense = { workspace = true }
+athena-ops-defense = { workspace = true }
+athena-orchestrator = { workspace = true }
+athena-execution = { workspace = true }
+
+# Dev tooling shared across all 6 workspace packages (PEP 735).
+# Runtime deps live in each package's [project.dependencies] per AR-BND1 layering.
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "pytest-xdist>=3",
+    "ruff>=0.7",
+    "mypy>=1.13",
+    "pre-commit>=4",
+    "import-linter>=2",
+]
+
+# pytest uses importlib import-mode to avoid test module name collisions
+# across the 6 packages (all define tests/test_*.py) — pytest-official recommendation
+# per https://docs.pytest.org/en/stable/explanation/pythonpath.html#import-modes
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = [
+    "--import-mode=importlib",
+    "-ra",
+    "--strict-markers",
+    # pytest-xdist: keep tests from the same file on one worker so the
+    # import-linter regression baseline does not race with the inject/restore tests.
+    "--dist=loadfile",
+]
+testpaths = ["packages", "tests"]
+asyncio_mode = "auto"
+markers = [
+    "integration: cross-package integration test (CI stage-3), mock KIS only",
+    "snapshot: historical-failure S_entry regression (CI stage-4), Story 2.1 fixture required",
+    "walk_forward: walk-forward backtest smoke (CI stage-5), Story 8.3 runner required",
+]
+
+# ruff: AR-CQ1 + Enforcement #3/#4/#6 banned-api
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = [".venv", "_bmad", "_bmad-output", "**/_version.py", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "S", "TID", "DTZ"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests use plain asserts (S101) and intentional subprocess (S404, S603).
+"**/tests/**/*.py" = ["S101", "S404", "S603", "S607"]
+"tests/**/*.py" = ["S101", "S404", "S603", "S607"]
+# Build hook intentionally invokes git via subprocess (sanctioned by AR-COM4).
+"packages/*/hatch_build.py" = ["S404", "S603", "S607"]
+# CI gate scripts shell out to git for commit-subject / tag inspection (Story 1.3 AC-4/AC-6).
+# Not runtime hotpath; per-file-ignore keeps subprocess ban intact elsewhere.
+"scripts/check_*.py" = ["S404", "S603", "S607"]
+# SecretName(StrEnum) values are keychain LOOKUP IDs, not real secrets — S105
+# (hardcoded password heuristic) is a definitional false positive for this
+# registry. The actual secrets live in the OS Keychain and are fetched via
+# `athena.core.keyring_client.get_secret` at runtime.
+"packages/athena-core/athena/core/keyring_client.py" = ["S105"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"pandas".msg = "Polars only per architecture.md#Enforcement-Guidelines #3"
+"requests".msg = "httpx.AsyncClient only per architecture.md#Enforcement-Guidelines #4"
+"urllib.request".msg = "httpx.AsyncClient only per architecture.md#Enforcement-Guidelines #4"
+
+[tool.ruff.format]
+quote-style = "double"
+
+# mypy: AR-CQ3 strict mode
+[tool.mypy]
+strict = true
+python_version = "3.13"
+mypy_path = "packages/athena-core:packages/athena-feature-store:packages/athena-alpha-defense:packages/athena-ops-defense:packages/athena-orchestrator:packages/athena-execution"
+# explicit_package_bases: required because `packages/<pkg>/athena/` is a PEP-420
+# namespace directory (no `__init__.py`). Without this, single-file mypy runs
+# (e.g. pre-commit on a single staged file) report
+# "Source file found twice under different module names" because mypy auto-walks
+# up the directory tree and resolves `packages/<pkg>/athena/<mod>/__init__.py`
+# as just `<mod>` while mypy_path resolves it as `athena.<mod>`.
+explicit_package_bases = true
+plugins = ["pydantic.mypy"]
+exclude = ["^_bmad/", "^_bmad-output/", "^\\.venv/", "^build/", "^dist/", "(^|/)tests/"]
+
+# Generated _version.py has no type annotations beyond the simple ones we declare.
+[[tool.mypy.overrides]]
+module = "athena.core._version"
+ignore_missing_imports = true
+ignore_errors = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true

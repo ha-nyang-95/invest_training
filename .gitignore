@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# uv venv
+.venv/
+
+# Hatchling auto-generated version files (Story 1.1 AC-5)
+packages/*/athena/*/_version.py
+
+# Data and secrets (NFR-S1: .env forbidden forever)
+data/
+.env
+.env.*
+
+# BMAD: track artifacts (_bmad/, _bmad-output/), ignore caches only
+_bmad/cache/
+
+# IDE/Tool Specific
+.agents/
+.gemini/
+.claude/
+
+# Node (defensive)
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db

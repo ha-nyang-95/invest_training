@@ -1,0 +1,17 @@
+[project]
+name = "athena-alpha-defense"
+version = "0.1.0"
+requires-python = ">=3.13,<3.14"
+description = "Athena alpha defense — 52-Flag Veto Gate (M1~M14, S_entry). Depends on core + feature_store."
+dependencies = [
+    "athena-core",
+    "athena-feature-store",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["athena"]
+only-include = ["athena/alpha_defense"]

@@ -1,0 +1,54 @@
+[importlinter]
+root_packages =
+    athena.core
+    athena.feature_store
+    athena.alpha_defense
+    athena.ops_defense
+    athena.orchestrator
+    athena.execution
+
+[importlinter:contract:layers]
+name = Athena layer order (one-way only)
+type = layers
+layers =
+    athena.execution
+    athena.orchestrator
+    athena.alpha_defense | athena.ops_defense
+    athena.feature_store
+    athena.core
+
+[importlinter:contract:core-leaf]
+name = athena.core is a leaf (no athena.* deps)
+type = forbidden
+source_modules =
+    athena.core
+forbidden_modules =
+    athena.feature_store
+    athena.alpha_defense
+    athena.ops_defense
+    athena.orchestrator
+    athena.execution
+
+[importlinter:contract:execution-no-orchestrator]
+name = execution MUST NOT import orchestrator (DTO interface only - AR-BND2)
+type = forbidden
+source_modules =
+    athena.execution
+forbidden_modules =
+    athena.orchestrator
+
+[importlinter:contract:alpha-no-execution]
+name = alpha_defense MUST NOT import execution
+type = forbidden
+source_modules =
+    athena.alpha_defense
+forbidden_modules =
+    athena.execution
+
+[importlinter:contract:ops-no-execution]
+name = ops_defense MUST NOT import execution
+type = forbidden
+source_modules =
+    athena.ops_defense
+forbidden_modules =
+    athena.execution

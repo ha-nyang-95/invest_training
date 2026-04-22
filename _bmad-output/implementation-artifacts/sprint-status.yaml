@@ -1,0 +1,140 @@
+# generated: 2026-04-21
+# last_updated: 2026-04-22  # Story 1.3 Task 3-6 automation started, status → in-progress
+# project: invest_training
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: {project-root}/_bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+generated: 2026-04-21
+last_updated: 2026-04-22
+project: invest_training
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+
+development_status:
+  # Epic 1: Foundation & Market Truth Capture
+  epic-1: in-progress
+  1-1-프로젝트-bootstrap-uv-monorepo-scaffold: done
+  1-2-환경-secrets-infrastructure-wsl2-os-keychain-ssh-signing: done
+  1-3-self-hosted-ci-cd-pipeline-7단계-gate: in-progress
+  1-4-duckdb-parquet-shard-rsync-data-pipeline: backlog
+  1-5-pre-trade-ledger-초기-세그먼트-sha-256-체인: backlog
+  1-6-f5-읽기전용-마운트-systemd-timer-infrastructure: backlog
+  1-7-l2-호가창-websocket-로거-24-7-fr1: backlog
+  1-8-dart-뉴스-피드-실시간-크롤러-fr2: backlog
+  1-9-observability-stack-기본-uptime-대시보드-fr47-partial: backlog
+  1-10-backup-schedule-automation-5-target: backlog
+  epic-1-retrospective: optional
+
+  # Epic 2: Alpha Defense — 52-Flag Veto Gate
+  epic-2: backlog
+  2-1-52-flag-registry-고정-snapshot-fixture-주입: backlog
+  2-2-m1-linguistic-certainty-scorer-kb-bert: backlog
+  2-3-m2-narrative-age-omori-law-decay: backlog
+  2-4-m3-pre-announcement-drift-z-score: backlog
+  2-5-m9-time-of-day-multiplier: backlog
+  2-6-m13-xgboost-1단계-비동기-llm-2단계-hybrid: backlog
+  2-7-m14-transfer-entropy-basket-gate: backlog
+  2-8-s-entry-곱셈-집계-수식-end-to-end-p99-검증: backlog
+  2-9-m25-거부-설명-리포트: backlog
+  2-10-flag-degrade-월간-missing-rate-계산-로직-nfr-a4-기반: backlog
+  epic-2-retrospective: optional
+
+  # Epic 3: Anti-Ego Firewall & Entry Authorization
+  epic-3: backlog
+  3-1-anti-ego-events-append-only-table-sha-256-chain: backlog
+  3-2-f1-흥정-언어-라벨링-cli: backlog
+  3-3-f1-kb-bert-fine-tune-pipeline: backlog
+  3-4-f1-실시간-흥정-언어-감지: backlog
+  3-5-f5-override-시도-inotify-watcher-logging: backlog
+  3-6-anti-ego-firewall-aggregator: backlog
+  3-7-이중-조건-entry-gate-s-entry-θ-entry-and-firewall-1: backlog
+  3-8-anti-ego-firewall-grafana-panel-partial-epic-7-완성: backlog
+  epic-3-retrospective: optional
+
+  # Epic 4: Execution & Hard-Locked Exit
+  epic-4: backlog
+  4-1-broker-adapter-abstraction-kis-primary-rest: backlog
+  4-2-kis-orders-websocket-체결-포지션-실시간-구독: backlog
+  4-3-orderintent-consumer-주문-발행-pipeline: backlog
+  4-4-m22-서버측-oco-hard-stop-loss: backlog
+  4-5-m19-손실-가속도-2차-미분-감시: backlog
+  4-6-이벤트-캘린더-근접도-alert-m16-mvp-scope: backlog
+  4-7-청산-이벤트-orders-ledger-통합-기록: backlog
+  epic-4-retrospective: optional
+
+  # Epic 5: Operational Defense & Risk Kill Switch
+  epic-5: backlog
+  5-1-slippage-tick-실측-s-entry-0-5-discount: backlog
+  5-2-portfolio-동시-상한-3종목-테마-중복-금지: backlog
+  5-3-data-quality-guardrails-뉴스-30초-drop-nlp-confidence-degrade: backlog
+  5-4-취소-재주문-throttle: backlog
+  5-5-4층-cb-state-machine-공통-기반: backlog
+  5-6-global-cb-일일-3-발동-익일-자동-재개: backlog
+  5-7-account-cb-mdd-8-cascade-복귀-워크플로우: backlog
+  5-8-session-cb-연속-3회-손절-2h-쿨다운: backlog
+  5-9-symbol-cb-m22-발동-당일-차단: backlog
+  5-10-heartbeat-5분-push-4h-auto-flatten-paper-only-자동-전환: backlog
+  epic-5-retrospective: optional
+
+  # Epic 6: Compliance, Audit & Capital Triggers
+  epic-6: backlog
+  6-1-pre-trade-ledger-writer-완성: backlog
+  6-2-월간-sha-256-체인-해시-2-target-외장-백업: backlog
+  6-3-176-fr40-분당-주문-수-취소율-30-regulatory-hard-block: backlog
+  6-4-17-18-단일-계좌-assertion: backlog
+  6-5-m-tax-세후-수익률-대주주-근접-경보: backlog
+  6-6-준법감시인-통지-워크플로우-자동-트리거: backlog
+  6-7-준법감시인-이메일-템플릿-회신-ledger-기록: backlog
+  6-8-가족-otp-공증-위임-체크리스트-외부-승인권자-서약서: backlog
+  epic-6-retrospective: optional
+
+  # Epic 7: Observability & Reporting
+  epic-7: backlog
+  7-1-prometheus-histogram-latency-공식-메트릭-레지스트리: backlog
+  7-2-8대-kpi-실시간-누적-계산-엔진: backlog
+  7-3-kpi-선언-조건-패널: backlog
+  7-4-통합-grafana-대시보드-완성: backlog
+  7-5-주간-거래-요약-리포트-자동-생성: backlog
+  7-6-월간-52-flag-missing-rate-감사-리포트: backlog
+  epic-7-retrospective: optional
+
+  # Epic 8: Model Lifecycle & Policy Change Gate
+  epic-8: backlog
+  8-1-주간-f1-라벨링-확장-anti-ego-events-자동-import: backlog
+  8-2-f1-라벨-psi-월간-계산-paper-only-자동-전환: backlog
+  8-3-walk-forward-백테스트-러너-공매도-재개-레짐-분리: backlog
+  8-4-bayesian-walk-forward-θ-entry-α-β-γ-튜닝: backlog
+  8-5-72h-cooling-gate-paper-재검증-marker-ci-완성: backlog
+  8-6-정책-변경-감사-로그-외부-승인권자-서명: backlog
+  epic-8-retrospective: optional
