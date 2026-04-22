@@ -35,6 +35,8 @@ repos:
           - pydantic>=2,<3
           - pydantic-settings>=2,<3
           - keyring>=25
+          - polars>=1
+          - duckdb>=1
 
   # AR-SEC1 + NFR-S1: never commit secrets/keys. detect-private-key catches PEM
   # headers only; gitleaks scans for API tokens / high-entropy strings / broker
