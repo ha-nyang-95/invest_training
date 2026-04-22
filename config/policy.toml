@@ -1,2 +1,4 @@
 # Story 2.8 populates alpha/beta/gamma/theta_entry/M_regime/M_time.
 # Story 1.6 will make this file chattr +i during 09:00-15:30 KST.
+
+# smoke-test: Task 6.6 end-to-end verification
