@@ -4,43 +4,43 @@
         "url": "https://api.github.com/repos/ha-nyang-95/invest_training/branches/master/protection/required_status_checks",
         "strict": true,
         "contexts": [
-            "ci-7-stage / stage-1-pre-commit",
-            "ci-7-stage / stage-2-pytest-unit",
-            "ci-7-stage / stage-3-pytest-integration",
-            "ci-7-stage / stage-4-snapshot-regression",
-            "ci-7-stage / stage-5-walk-forward-smoke",
-            "ci-7-stage / stage-6-cooling-gate",
-            "ci-7-stage / stage-7-paper-replay-marker"
+            "stage-1-pre-commit",
+            "stage-2-pytest-unit",
+            "stage-3-pytest-integration",
+            "stage-4-snapshot-regression",
+            "stage-5-walk-forward-smoke",
+            "stage-6-cooling-gate",
+            "stage-7-paper-replay-marker"
         ],
         "contexts_url": "https://api.github.com/repos/ha-nyang-95/invest_training/branches/master/protection/required_status_checks/contexts",
         "checks": [
             {
-                "context": "ci-7-stage / stage-1-pre-commit",
-                "app_id": null
+                "context": "stage-1-pre-commit",
+                "app_id": 15368
             },
             {
-                "context": "ci-7-stage / stage-2-pytest-unit",
-                "app_id": null
+                "context": "stage-2-pytest-unit",
+                "app_id": 15368
             },
             {
-                "context": "ci-7-stage / stage-3-pytest-integration",
-                "app_id": null
+                "context": "stage-3-pytest-integration",
+                "app_id": 15368
             },
             {
-                "context": "ci-7-stage / stage-4-snapshot-regression",
-                "app_id": null
+                "context": "stage-4-snapshot-regression",
+                "app_id": 15368
             },
             {
-                "context": "ci-7-stage / stage-5-walk-forward-smoke",
-                "app_id": null
+                "context": "stage-5-walk-forward-smoke",
+                "app_id": 15368
             },
             {
-                "context": "ci-7-stage / stage-6-cooling-gate",
-                "app_id": null
+                "context": "stage-6-cooling-gate",
+                "app_id": 15368
             },
             {
-                "context": "ci-7-stage / stage-7-paper-replay-marker",
-                "app_id": null
+                "context": "stage-7-paper-replay-marker",
+                "app_id": 15368
             }
         ]
     },
