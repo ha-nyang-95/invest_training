@@ -182,15 +182,15 @@ Execute **in order**. Mark `[x]` only when both implementation AND tests pass. R
       --unattended \
       --replace
     ```
-  - [x] 1.3 systemd system-level unit 로 등록 (`./svc.sh install khuk0` 가 `/etc/systemd/system/` 에 service 파일 생성; WSL2 에서 user-level 대신 system-level 이 안정적이라 본 스토리는 system scope 채택. `loginctl enable-linger khuk0` 로 로그아웃 시에도 살아있게 설정):
+  - [x] 1.3 systemd **system-level** unit 로 등록 (`sudo ./svc.sh install khuk0` 가 `/etc/systemd/system/actions.runner.<owner>-<repo>.<name>.service` 생성). system-level 이므로 `loginctl enable-linger` 가 원래 의미 (user systemd 를 로그아웃 후에도 유지) 로는 불필요 — system instance 는 boot 부터 세션과 무관하게 동작. 본 스토리에서는 보수적으로 `sudo loginctl enable-linger khuk0` 도 같이 실행했으나 no-op (user-level fallback 경로를 미리 열어두는 효과만 있음):
     ```bash
-    sudo loginctl enable-linger khuk0     # 로그인 세션 없이도 user systemd 동작
+    sudo loginctl enable-linger khuk0     # system-level 에서는 no-op; user-level fallback 경로 대비
     cd ~/actions-runner
-    ./svc.sh install khuk0
-    ./svc.sh start
-    systemctl --user status 'actions.runner.*.service'
+    sudo ./svc.sh install khuk0           # /etc/systemd/system/ 에 unit 생성
+    sudo ./svc.sh start
+    systemctl status 'actions.runner.*.service'   # system instance 조회 (--user 플래그 없음)
     ```
-    (`svc.sh` 는 ActionsRunnerController 가 system-level unit 을 생성 — user scope 로 전환 필요 시 `--user` 플래그 계열을 수동으로 생성; Amelia 가 실제 `svc.sh` 출력을 보고 user scope 또는 system scope 중 WSL2 에서 안정적으로 작동하는 것을 playbook 에 기록 — Debug Log #N 에 정리)
+    (`svc.sh install` 은 ActionsRunnerController 공식 스크립트의 system-level 경로. user-scope 가 필요한 배포는 `--user` 플래그 포함 명령을 수동 구성해야 하지만 WSL2 에서는 system-level 이 안정적이라 본 스토리는 system scope 채택. 실제 Apr 22 15:28:27 KST 설치 로그: `Loaded: loaded (/etc/systemd/system/actions.runner.ha-nyang-95-invest_training.athena-trading-pc.service; enabled; preset: enabled)` · `Active: active (running)`.)
   - [x] 1.4 `gh api /repos/ha-nyang-95/invest_training/actions/runners` JSON 출력: `{"busy":false,"labels":["self-hosted","Linux","X64","trading-pc","wsl2-ubuntu-24.04"],"name":"athena-trading-pc","status":"online"}`. playbook 에 기록됨.
   - [x] 1.5 `chmod 600 ~/actions-runner/.runner ~/actions-runner/.credentials ~/actions-runner/.credentials_rsaparams` — config.sh 호출 직후 자동 실행.
   - [ ] 1.6 WSL2 재시작 후 자동 재기동 검증 — Khuk0 편의 시 `wsl --shutdown` → 재진입 → `systemctl status actions.runner.*.service` 확인하여 playbook 에 append. 본 스토리 자동화 범위 외.
