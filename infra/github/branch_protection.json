@@ -44,13 +44,6 @@
             }
         ]
     },
-    "required_pull_request_reviews": {
-        "url": "https://api.github.com/repos/ha-nyang-95/invest_training/branches/master/protection/required_pull_request_reviews",
-        "dismiss_stale_reviews": false,
-        "require_code_owner_reviews": false,
-        "require_last_push_approval": false,
-        "required_approving_review_count": 0
-    },
     "required_signatures": {
         "url": "https://api.github.com/repos/ha-nyang-95/invest_training/branches/master/protection/required_signatures",
         "enabled": true
@@ -60,7 +53,7 @@
         "enabled": true
     },
     "required_linear_history": {
-        "enabled": true
+        "enabled": false
     },
     "allow_force_pushes": {
         "enabled": false

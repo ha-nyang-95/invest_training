@@ -488,8 +488,10 @@ Execute **in order**. Mark `[x]` only when both implementation AND tests pass. R
 4. **`paper-replay-ok/<short_sha>` tag 는 lightweight (non-annotated)** [Task 4.3]
    SSH signing 과 충돌 방지 (`tag.gpgsign=true` 는 annotated tag 에만 적용). 또한 marker 는 "검증 완료 표식" 일 뿐 감사 항목이 아님 — 감사 체인은 signed commit 본체가 담당.
 
-5. **branch protection 은 `required_signatures=true` + `enforce_admins=true` + `required_linear_history=true`** [Task 5]
+5. **branch protection 은 `required_signatures=true` + `enforce_admins=true` + merge commit + `allow_force_pushes=false`** [Task 5, revised 2026-04-22]
    솔로 개발자인 Khuk0 본인도 `master` 에 직접 push 불가 — NFR-A5 의 "누가·언제·무엇·왜" 감사 체인이 비상 사태에서도 깨지지 않음. 비상 해제 시나리오는 GitHub UI 에서 일시적으로 protection rule 끄기 (→ `last_updated` 가 audit event 로 남음) — 본 스토리 scope 아님 (Story 6.6 준법감시인 통지 워크플로우 참고).
+
+   **원래 invariant 에서 `required_linear_history=true` 와 `required_pull_request_reviews={required_approving_review_count:0}` 를 가정했으나, GitHub 의 기술적 제약 때문에 이 두 규칙과 `required_signatures=true` 를 동시에 만족하는 merge 경로가 존재하지 않음** (rebase/squash merge 시 GitHub 이 새 SHA 의 서명을 자동 생성 못함 → `required_signatures` fail; merge commit 은 2-parent 라 `required_linear_history` fail). 따라서 `required_linear_history=false` 로 조정 + `required_pull_request_reviews=null` 로 완전 제거 + merge commit 허용 (merge commit 은 GitHub web-flow key 로 자동 서명되어 required_signatures 통과). history rewrite 금지의 실질은 `allow_force_pushes=false` + `allow_deletions=false` 로 이미 enforce 되므로 NFR-A5 감사 체인 무결성은 유지됨. 이 충돌은 Story 1.3 Dev Notes 작성 시점에 놓쳤던 GitHub 제약 (참고: GitHub docs "Rebase merges cannot be automatically signed").
 
 6. **`scripts/check_*.py` 는 package 가 아님** [architecture.md#Structure-Patterns line 436]
    `__init__.py` 없음, `packages/athena-*` 레이어 구조 바깥. ruff per-file-ignore 로 subprocess 허용, mypy strict 는 `mypy_path` 에 미포함 (현재 `pyproject.toml` 의 `mypy_path` 는 `packages/` 만). 본 스토리는 `scripts/` 에 mypy 적용 안 함 — Story 1.9 또는 후속에서 scripts 타입 커버리지 추가 검토.

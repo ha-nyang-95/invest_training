@@ -51,12 +51,9 @@ gh api -X PUT "repos/${OWNER}/${REPO}/branches/master/protection" \
     ]
   },
   "enforce_admins": true,
-  "required_pull_request_reviews": {
-    "required_approving_review_count": 0,
-    "dismiss_stale_reviews": false
-  },
+  "required_pull_request_reviews": null,
   "restrictions": null,
-  "required_linear_history": true,
+  "required_linear_history": false,
   "allow_force_pushes": false,
   "allow_deletions": false,
   "required_conversation_resolution": true,
