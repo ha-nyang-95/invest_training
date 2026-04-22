@@ -60,7 +60,7 @@ repos:
     hooks:
       - id: policy-prefix-guard
         name: Detect policy changes that lack `policy:` commit prefix
-        entry: python scripts/check_policy_prefix.py
+        entry: uv run python scripts/check_policy_prefix.py
         language: system
         stages: [commit-msg]
         always_run: true

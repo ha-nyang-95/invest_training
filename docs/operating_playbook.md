@@ -383,22 +383,38 @@ following sub-sections are populated as each step is completed.
 
 Branch protection activates `required_signatures: true` on `master` as soon as
 Khuk0 runs `scripts/setup_branch_protection.sh`. Until Windows host SSH signing
-lands (Story 1.7, deferred), **every commit must originate from WSL2**:
+lands (Story 1.7, still deferred but no longer a blocker), **the entire dev
+loop — edit, pre-commit, pytest, signed commit — runs inside WSL2 Ubuntu 24.04**:
 
 ```bash
-# Correct — WSL2 shell, signed commit.
-wsl.exe -d Ubuntu -- bash -lc 'cd /mnt/c/Users/khuk0/vibe/invest_training && git commit -S -m "..."'
+wsl -d Ubuntu
+cd /mnt/c/Users/khuk0/vibe/invest_training
 
-# Banned until Story 1.7 — Windows Git Bash commits are unsigned and will be
-# rejected by the required_signatures rule at push time.
+# pre-commit hook chain runs on its own during `git commit`, so the explicit
+# `--all-files` run is only needed when you want to verify untouched files.
+uv run pytest -n auto
+git commit -S -m "..."
 ```
 
-Pre-commit still runs from Windows Git Bash (`uv run pre-commit run --all-files`)
-because WSL2 does not yet host `uv` — this is the same python3.13 gap Story 1.2
-Task 5.4 documented. Story 1.3 commits therefore use `--no-verify` on the WSL2
-`git commit` because the hook chain was already verified from the Windows side.
-This concession is confined to the pre-commit bypass — the commit signature
-itself is always produced and verified in WSL2.
+WSL2 toolchain state (installed 2026-04-22 in Story 1.3 session):
+
+- `uv 0.11.7` at `~/.local/bin/uv` (sourced by `~/.bashrc` via
+  `$HOME/.local/bin/env`).
+- `CPython 3.13.13` under uv-managed Python (`uv python install 3.13`).
+- `gh 2.45.0` from `apt` (Ubuntu `noble-updates/universe`).
+- `.venv/` reproduced via `uv sync --frozen --group dev` (64 packages).
+- Git hooks installed via `uv run pre-commit install` and
+  `uv run pre-commit install --hook-type commit-msg`.
+
+Because hooks now run natively in WSL2 alongside `git commit`, `--no-verify`
+is no longer used. The hybrid "pre-commit on Windows Git Bash + commit on
+WSL2 proxy" pattern (used for Story 1.3 commits `c7b88a8`, `4cb1b12`,
+`9a763ca`, `23051cb`, `ec5c45e`, `bb633df` because WSL2 lacked the toolchain
+at that point) is retired.
+
+Windows host git remains **banned as a commit origin** until Story 1.7
+configures SSH signing there, because `required_signatures: true` rejects
+unsigned commits at push time.
 
 ### Self-Hosted Runner Bootstrap (Task 1 — Khuk0 manual)
 
