@@ -66,9 +66,24 @@ EOF
 
 echo "Exporting baseline to infra/github/branch_protection.json ..." >&2
 mkdir -p infra/github
-# Use python3 -m json.tool (stdlib) instead of jq so the script stays self-contained
-# on a minimal WSL2 Ubuntu install (jq is not in default apt selections).
-gh api "repos/${OWNER}/${REPO}/branches/master/protection" \
-  | python3 -m json.tool \
-  > infra/github/branch_protection.json
+# Use python3 stdlib (jq is not in Ubuntu 24.04 default apt) and strip every
+# `url` / `*_url` key so the baseline is portable across forks and repo renames
+# — drift detection compares policy semantics, not endpoint paths.
+gh api \
+  -H "Accept: application/vnd.github+json" \
+  "repos/${OWNER}/${REPO}/branches/master/protection" \
+  | python3 -c '
+import json, sys
+
+def strip_urls(o):
+    if isinstance(o, dict):
+        return {k: strip_urls(v) for k, v in o.items()
+                if k != "url" and not k.endswith("_url")}
+    if isinstance(o, list):
+        return [strip_urls(x) for x in o]
+    return o
+
+json.dump(strip_urls(json.load(sys.stdin)), sys.stdout, indent=2, sort_keys=True)
+sys.stdout.write("\n")
+' > infra/github/branch_protection.json
 echo "done." >&2
