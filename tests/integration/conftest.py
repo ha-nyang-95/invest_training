@@ -32,8 +32,26 @@ def _load_script_module(name: str) -> ModuleType:
 
 
 @pytest.fixture
-def load_script() -> Callable[[str], ModuleType]:
-    return _load_script_module
+def load_script(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[[str], ModuleType]:
+    """Load a script module, restoring `sys.modules` on teardown.
+
+    Without the monkeypatch cleanup, a stale `sys.modules[name]` from a
+    prior test could leak into a later test that imports the same script
+    without going through this fixture.
+    """
+
+    def _load(name: str) -> ModuleType:
+        previous = sys.modules.get(name)
+        module = _load_script_module(name)
+        if previous is None:
+            monkeypatch.delitem(sys.modules, name, raising=False)
+        else:
+            monkeypatch.setitem(sys.modules, name, previous)
+        return module
+
+    return _load
 
 
 @pytest.fixture
@@ -107,7 +125,24 @@ def make_commit(
 def _base_env() -> dict[str, str]:
     import os
 
-    keep = {"PATH", "USER", "USERNAME", "LOGNAME", "HOME", "HOMEPATH", "SYSTEMROOT"}
+    # Windows git needs `USERPROFILE` / `APPDATA` / `LOCALAPPDATA` to locate
+    # gitconfig and `TMP` / `TEMP` for temp-object writes; omitting them makes
+    # `git commit` hang or fail on Windows-hosted runners.
+    keep = {
+        "PATH",
+        "USER",
+        "USERNAME",
+        "LOGNAME",
+        "HOME",
+        "HOMEPATH",
+        "SYSTEMROOT",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "TMP",
+        "TEMP",
+        "TMPDIR",
+    }
     return {k: v for k, v in os.environ.items() if k in keep}
 
 

@@ -440,10 +440,15 @@ tar xzf actions-runner-linux-x64.tar.gz
   --unattended \
   --replace
 
+# System-level systemd unit (Task 1.3 Change Log — chosen over user-level for
+# boot-from-cold independence of login session). `svc.sh install` with `sudo`
+# writes the unit under `/etc/systemd/system/` and starts it as root-launched
+# service running as Khuk0. The `loginctl enable-linger` below is kept as a
+# belt-and-braces no-op for any future revert to user-scope.
 sudo loginctl enable-linger khuk0
-./svc.sh install khuk0
-./svc.sh start
-systemctl --user status 'actions.runner.*.service'
+sudo ./svc.sh install khuk0
+sudo ./svc.sh start
+sudo systemctl status 'actions.runner.*.service'
 
 chmod 600 ~/actions-runner/.runner \
           ~/actions-runner/.credentials \
@@ -455,7 +460,7 @@ Verification artefacts (to be pasted here once Khuk0 completes the bootstrap):
 
 - `gh api repos/<OWNER>/invest_training/actions/runners` JSON (name, labels,
   status=`online`).
-- `systemctl --user status actions.runner.<OWNER>-invest_training.athena-trading-pc.service`
+- `sudo systemctl status actions.runner.<OWNER>-invest_training.athena-trading-pc.service`
   showing `active (running)` after a `wsl --shutdown` reboot.
 - Confirmation that the token value has been discarded (not stored anywhere).
 
