@@ -66,6 +66,9 @@ EOF
 
 echo "Exporting baseline to infra/github/branch_protection.json ..." >&2
 mkdir -p infra/github
-gh api "repos/${OWNER}/${REPO}/branches/master/protection" | jq '.' \
+# Use python3 -m json.tool (stdlib) instead of jq so the script stays self-contained
+# on a minimal WSL2 Ubuntu install (jq is not in default apt selections).
+gh api "repos/${OWNER}/${REPO}/branches/master/protection" \
+  | python3 -m json.tool \
   > infra/github/branch_protection.json
 echo "done." >&2
