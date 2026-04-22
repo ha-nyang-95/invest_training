@@ -553,6 +553,67 @@ Execute **in order**. Mark `[x]` only when both implementation AND tests pass. R
   - [x] 7.6 sprint-status.yaml `1-4-*` → `review` + `last_updated` 갱신.
   - [x] 7.7 핸드오프 commit: `chore(story-1.4): DuckDB + Parquet shard + rsync pipeline verified, hand off to Story 1.5` — signed. PR / squash merge 는 Khuk0 가 review 단계에서 수행.
 
+### Review Findings (code review 2026-04-22 — 3-layer adversarial)
+
+Reviewers: Blind Hunter (diff-only adversarial) / Edge Case Hunter (path tracer) / Acceptance Auditor (spec-vs-code). Dedup 후 40 findings (36 patch + 1 decision + 3 defer + 4 dismissed-as-noise).
+
+**Decision-needed:**
+- [x] [Review][Decision→Patch] rsync `--delete-after --max-delete=100` 추가 (옵션 C) — sync semantics 선제 정착 + 폭주 상한; Story 1.10 retention 활성 시 즉시 효과 [`infra/systemd/athena-logger-sync.service` ExecStart]
+
+**Patch (CRITICAL):**
+- [x] [Review][Patch] systemd `$EXIT_STATUS` 는 `ExecStartPost=` 에서 undefined — AC-5 observability 신호 구조적 파손 [`infra/systemd/athena-logger-sync.service` ExecStartPost + `scripts/emit_logger_sync_metric.py:--exit-code`]
+- [x] [Review][Patch] Prometheus 알람 `absent()` 미처리 — 메트릭 시계열 자체 부재 시 silent failure [`infra/prometheus/rules/data_pipeline.rules.yml:12`]
+- [x] [Review][Patch] `_empty_<table>` 이 `decisions.duckdb` 에 영구 테이블 생성 — D1 write-scope 불변식 위반 [`packages/athena-feature-store/athena/feature_store/parquet_reader.py:_create_empty_view`]
+- [x] [Review][Patch] Parquet 쓰기 non-atomic (tmp+rename 부재) — power-cut/disk-full 시 partial 파일이 다음 `mode="fail"` 을 영구 차단 [`packages/athena-feature-store/athena/feature_store/parquet_shard.py:export_hour_shard`]
+- [x] [Review][Patch] tz-aware datetime 검증 누락 — naive 입력 시 9h silent skew (`export_hour_shard`, `query_recent_ticks`, `query_news_for_symbol`); `FeatureStore.__init__` 에서 `SET TimeZone='UTC'` 추가 [`parquet_shard.py`, `feature_query.py`]
+- [x] [Review][Patch] `_data_equals` NaN/NULL 순서/중복 결함 + 파일 set 비교 누락 — mode='check' 드리프트 오탐/부분쓰기 미탐 [`parquet_shard.py:_data_equals`]
+- [x] [Review][Patch] write-scope 불변식 literal substring 매칭 — `INSERT  INTO ticks` (공백2) / f-string 으로 우회 가능; false-positive/negative 모두 성립 [`tests/regression/test_trading_pc_write_scope.py`]
+
+**Patch (MAJOR):**
+- [ ] [Review][Patch] `parse_hour` 범위·포맷 검증 부재 (`now-0`, `now--5`, `YYYY-MM-DD HH` 공백 등 silent no-op 또는 bare traceback) [`scripts/export_parquet_shard.py:parse_hour`]
+- [ ] [Review][Patch] rsync `--chown=khuk0:khuk0` 미설정 — UID mismatch 시 파일 unreadable → 0 rows silent [`infra/systemd/athena-logger-sync.service:ExecStart`]
+- [ ] [Review][Patch] rsync `--partial-dir=.rsync-partial` 이 `/data/parquet/` 내부 → hive partition namespace 오염 (rglob 가 미완성 `.parquet` 포착) [`infra/systemd/athena-logger-sync.service:ExecStart`]
+- [ ] [Review][Patch] `FeatureStore.refresh_views()` 메서드 추가 — long-lived Trading PC 프로세스가 rsync 된 신규 shard 를 재시작 없이 반영 [`packages/athena-feature-store/athena/feature_store/feature_query.py:FeatureStore`]
+- [ ] [Review][Patch] `attach_parquet_views` TOCTOU race — `has_shards` 체크와 `read_parquet` 사이 rsync 경합 시 view 생성 실패; try/except 재시도 필요 [`parquet_reader.py:attach_parquet_views`]
+- [ ] [Review][Patch] `attach_parquet_views` rglob 성능 — 250k 파일 규모에서 full walk → init latency 수 초; `next(rglob, None)` early-exit 로 교체 [`parquet_reader.py:attach_parquet_views`]
+- [ ] [Review][Patch] SIGTERM handler 없음 — systemd kill 시 half-export + JSON result 미출력; `signal.signal(SIGTERM, …)` 로 partial JSON + exit 130 [`scripts/export_parquet_shard.py:main`]
+- [ ] [Review][Patch] `__NULL__` sentinel 문자열 충돌 + symbol filesystem-hostile char (`/`,`\`,`:`, NUL, 빈 문자열) 미검증 — export 전 `re.match(r'^[A-Za-z0-9_\-]{1,32}$', symbol)` validation [`parquet_shard.py:export_hour_shard`]
+- [ ] [Review][Patch] SQL f-string 경로·식별자 인젝션 잠재성 — `shard_glob` 의 `'` escape 누락 + `_validate_ident` 일부 경로 미적용 + DuckDB 예약어 수용 [`parquet_reader.py`, `schemas.py:_validate_ident`]
+- [ ] [Review][Patch] `emit_logger_sync_metric.py` 다수 방어 부족 — `--exit-code` 빈 문자열 crash / orphan `.tmp` 누적 / prev 메트릭 float-parse 실패 / NaN·inf 렌더링 무효 / 동시 lost-update [`scripts/emit_logger_sync_metric.py`]
+- [ ] [Review][Patch] DTO/DDL parity — 이름 set 만 검증, 타입/NOT NULL/DEFAULT 드리프트 놓침 [`tests/regression/test_dto_ddl_parity.py`]
+- [ ] [Review][Patch] systemd 유닛이 `/home/khuk0/invest_training/...` 절대경로 하드코딩 — repo 이동/UID 변경 시 silent 파손; installer 가 치환하거나 `EnvironmentFile` 사용 [`infra/systemd/athena-logger-sync.service:ExecStart, ExecStartPost`]
+- [ ] [Review][Patch] installer 부분 설치 상태 + 비원자 swap — `sudo chown` 실패 시 daemon-reload 전 abort / `sudo cp` 가 running 유닛 파일 덮어씀 / symlink 경로 미해결 / dry-run 이 log 디렉토리 생성 parity 없음 [`scripts/install_logger_sync_unit.sh`]
+- [ ] [Review][Patch] `FeatureStore.__init__` 부분 초기화 리소스 누수 — `attach_parquet_views` 예외 시 `self._conn` close 없음 → Windows `.duckdb.wal` 락 잔존 [`packages/athena-feature-store/athena/feature_store/feature_query.py:FeatureStore.__init__`]
+- [ ] [Review][Patch] `test_decisions_db_created_under_parent_dir` Windows 락 경합 플래키 [`tests/integration/test_feature_query_smoke.py`]
+- [ ] [Review][Patch] `--tables` 인자 validation 없음 — 부분 export 후 partial-state 로 다음 실행 시 SHARD_ALREADY_EXISTS [`scripts/export_parquet_shard.py:main`]
+- [ ] [Review][Patch] `duckdb.IOException` (DB_LOCKED) 예외 처리 없음 — Logger daemon + cron 경합 시 bare traceback [`scripts/export_parquet_shard.py:main`]
+- [ ] [Review][Patch] top-level 예외 JSON stderr contract 없음 — disk full / OOM 등 비-shard 예외가 raw traceback 으로 escape → Story 1.9 observability 미스파싱 [`scripts/export_parquet_shard.py:main`]
+- [ ] [Review][Patch] Prometheus `for: 30s` — NFR-O2 120s SLO 가 실제로는 150s+ 에야 alarm fire; `for: 0s` 또는 SLO 재정의 [`infra/prometheus/rules/data_pipeline.rules.yml`]
+- [ ] [Review][Patch] systemd timer `Persistent=true` thundering herd + runtime>60s 큐잉 — `RandomizedDelaySec=5s` + `TimeoutStartSec=55s` 검토 [`infra/systemd/athena-logger-sync.timer`]
+- [ ] [Review][Patch] Decimal overflow 테스트 미검증 — DECIMAL(18,4) 초과값 silent 라운딩 케이스 [`packages/athena-feature-store/tests/test_schemas.py`]
+
+**Patch (MINOR):**
+- [ ] [Review][Patch] `_validate_ident` SQL 예약어 수용 (`interval`, `order` 등 통과) — DuckDB reserved-word list 대조 추가 [`schemas.py:_validate_ident`]
+- [ ] [Review][Patch] partition pruning 테스트 tautology — `"parquet"`/`"filter"` 는 항상 매치; `pruned_files:` 또는 `selected_files:` 로 좁히기 [`tests/integration/test_feature_query_smoke.py`]
+- [ ] [Review][Patch] p95 하드코딩 `[94]` — 샘플 수 변경 시 IndexError; `numpy.percentile(latencies, 95)` 또는 `statistics.quantiles` [`tests/integration/test_feature_query_smoke.py`]
+- [ ] [Review][Patch] `with` context manager docstring 부재 — DuckDB 1.x 에서 동작 확인됐으나 caller 누수 방지 문구 추가 [`packages/athena-feature-store/athena/feature_store/duckdb_client.py`]
+- [ ] [Review][Patch] CLI 테스트가 finally/close 미검증 — subprocess returncode 만 체크 → DuckDB 락/wal 누수 놓침; 동일 path 재오픈 성공 assert [`tests/integration/test_parquet_shard_export.py`]
+- [ ] [Review][Patch] 동시성 메트릭 테스트가 terminal state 만 검증 + `shutil.rmtree(tmp_path)` 안티패턴 [`tests/integration/test_logger_sync_metric.py`]
+- [ ] [Review][Patch] `_empty_<table>` 재생성 불가 (`CREATE TABLE IF NOT EXISTS` 가 스키마 드리프트 시 stale 테이블 유지) — `DROP TABLE IF EXISTS` 선행 또는 `CREATE TEMP TABLE` (P3 와 병합 가능) [`parquet_reader.py:_create_empty_view`]
+- [ ] [Review][Patch] DTO/DDL parity test 가 creator 의 `table_name=` 기본값 변경에 취약 — 명시 인자 전달 [`tests/regression/test_dto_ddl_parity.py`]
+- [ ] [Review][Patch] Dev Agent Record File List 라벨 "(7) tests" 이나 실제 8개 열거 — 문서 오타 (`(8)` 로 수정 또는 `test_dto_ddl_parity.py` 별도 섹션) [본 스토리 파일 File List]
+
+**Defer (code review 2026-04-22):**
+- [x] [Review][Defer] 가상 symbol-less future storage 테이블 시나리오 — 현재 `ticks`/`quotes`/`news` 외 테이블 없음; 본 스토리 범위 밖 [`parquet_shard.py:export_hour_shard`] — deferred, 새 storage 테이블 추가 스토리 (Epic 2+) 에서 회귀
+- [x] [Review][Defer] SSH key 부팅 전 로드 타이밍 (logger-pc DNS/SSH 해석 실패) — 운영 환경 의존; Story 1.2 key 배포 + Story 1.7 Logger PC 실호스트 등록 시점에 재현 [`infra/systemd/athena-logger-sync.service:After=network-online.target`] — deferred, Story 1.7
+- [x] [Review][Defer] NTP step backward → `last_success > now` 음수 lag — 시스템 레벨 이슈, Athena 단독 수정 범위 초과; 극히 드문 케이스 [`scripts/emit_logger_sync_metric.py`] — deferred, pre-existing system concern
+
+**Dismissed as noise:**
+- `.gitignore` 4-layer negation pattern — 실제 동작 + 저자 주석 있음
+- `published_at_utc` TZ round-trip 주관적 우려 — auditor 가 "not a bug, documented" 판정
+- AC-3 narrative `--dry-run` flag vs 실제 `DRY_RUN=1` env var — spec 내부 narrative 불일치, 코드/테스트/playbook 모두 env var 일관 (Task 3.3 사양 따름)
+- `EXPLAIN` vs 스펙 literal `EXPLAIN ANALYZE` — spec AC-4 가 substring-match relaxation 명시적 허용
+
 ## Dev Notes
 
 ### Source-of-Truth Invariants (Story 1.4 가 Down-stream 전역에 고정하는 불변식)

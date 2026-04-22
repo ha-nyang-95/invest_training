@@ -177,6 +177,34 @@ def test_null_symbol_news_goes_to_sentinel_partition(tmp_path: Path) -> None:
     assert (part_dir / "symbol=005930.parquet").exists()
 
 
+def test_naive_hour_rejected(
+    logger_db_with_ticks: tuple[duckdb.DuckDBPyConnection, Path],
+) -> None:
+    """Review-flip fix: naive datetime binds as TIMESTAMP (session-TZ) against
+    a TIMESTAMPTZ column, so a KST-host call with naive `hour_utc_start`
+    filters the wrong 9h window and silently returns zero rows — data loss
+    invisible until downstream queries."""
+    conn, out_root = logger_db_with_ticks
+    # Naive datetime is the point of the test (probe the guard).
+    naive_hour = datetime(2026, 4, 21, 9, 0, 0)  # noqa: DTZ001
+    with pytest.raises(ValueError, match="timezone-aware"):
+        export_hour_shard(conn, "ticks", naive_hour, out_root)
+
+
+def test_write_leaves_no_tmp_file(
+    logger_db_with_ticks: tuple[duckdb.DuckDBPyConnection, Path],
+) -> None:
+    """Review-flip fix: atomic write path uses `<file>.tmp.<pid>` then
+    `replace()`. On a successful write there must be no `.tmp.*` residue
+    in the partition dir; on a crash the except-branch unlinks the tmp.
+    This test pins the happy-path cleanliness."""
+    conn, out_root = logger_db_with_ticks
+    export_hour_shard(conn, "ticks", HOUR, out_root)
+    part_dir = out_root / "ticks/year=2026/month=04/day=21/hour=09"
+    tmp_leftovers = list(part_dir.glob("*.tmp.*"))
+    assert not tmp_leftovers, f"atomic rename left residue: {tmp_leftovers}"
+
+
 def test_cli_smoke_happy_path(
     logger_db_with_ticks: tuple[duckdb.DuckDBPyConnection, Path],
     tmp_path: Path,

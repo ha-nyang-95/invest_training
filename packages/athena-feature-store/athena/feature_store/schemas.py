@@ -214,28 +214,53 @@ _NEWS_COLUMNS = """
 """.strip()
 
 
-def create_ticks_table(conn: duckdb.DuckDBPyConnection, table_name: str = "ticks") -> None:
+# `temporary=True` creates a session-scoped TEMP TABLE that dies with the
+# connection and is NOT persisted to the underlying .duckdb file. This is
+# load-bearing for parquet_reader._create_empty_view: it must not materialise
+# `_empty_<table>` rows into decisions.duckdb (D1 / #PT-2: Trading PC writes
+# only the 5 allowed tables). Indexes are skipped for temporary tables — the
+# empty fallback has zero rows so no scan benefit.
+def _create_kw(temporary: bool) -> str:
+    return "CREATE TEMP TABLE" if temporary else "CREATE TABLE"
+
+
+def create_ticks_table(
+    conn: duckdb.DuckDBPyConnection, table_name: str = "ticks", *, temporary: bool = False
+) -> None:
     _validate_ident(table_name)
-    conn.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({_TICKS_COLUMNS})")  # noqa: S608
     conn.execute(
-        f"CREATE INDEX IF NOT EXISTS idx_{table_name}_symbol_ts "  # noqa: S608
-        f'ON {table_name}(symbol, "timestamp")'
+        f"{_create_kw(temporary)} IF NOT EXISTS {table_name} ({_TICKS_COLUMNS})"  # noqa: S608
     )
+    if not temporary:
+        conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_{table_name}_symbol_ts "  # noqa: S608
+            f'ON {table_name}(symbol, "timestamp")'
+        )
 
 
-def create_quotes_table(conn: duckdb.DuckDBPyConnection, table_name: str = "quotes") -> None:
+def create_quotes_table(
+    conn: duckdb.DuckDBPyConnection, table_name: str = "quotes", *, temporary: bool = False
+) -> None:
     _validate_ident(table_name)
-    conn.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({_QUOTES_COLUMNS})")  # noqa: S608
     conn.execute(
-        f"CREATE INDEX IF NOT EXISTS idx_{table_name}_symbol_ts "  # noqa: S608
-        f'ON {table_name}(symbol, "timestamp")'
+        f"{_create_kw(temporary)} IF NOT EXISTS {table_name} ({_QUOTES_COLUMNS})"  # noqa: S608
     )
+    if not temporary:
+        conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_{table_name}_symbol_ts "  # noqa: S608
+            f'ON {table_name}(symbol, "timestamp")'
+        )
 
 
-def create_news_table(conn: duckdb.DuckDBPyConnection, table_name: str = "news") -> None:
+def create_news_table(
+    conn: duckdb.DuckDBPyConnection, table_name: str = "news", *, temporary: bool = False
+) -> None:
     _validate_ident(table_name)
-    conn.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({_NEWS_COLUMNS})")  # noqa: S608
     conn.execute(
-        f"CREATE INDEX IF NOT EXISTS idx_{table_name}_published_at "  # noqa: S608
-        f"ON {table_name}(published_at_utc)"
+        f"{_create_kw(temporary)} IF NOT EXISTS {table_name} ({_NEWS_COLUMNS})"  # noqa: S608
     )
+    if not temporary:
+        conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_{table_name}_published_at "  # noqa: S608
+            f"ON {table_name}(published_at_utc)"
+        )

@@ -35,6 +35,12 @@ class FeatureStore:
 
     def __init__(self, decisions_db: Path, parquet_root: Path) -> None:
         self._conn = open_decisions_duckdb(decisions_db)
+        # Pin the session TZ so `now()` and TIMESTAMPTZ comparisons use UTC
+        # regardless of the host's tzdata default (WSL2 ships Asia/Seoul).
+        # Otherwise `query_recent_ticks`'s `now() - INTERVAL` runs in KST and
+        # the filter mismatches UTC-stored data by 9 hours, silently returning
+        # empty results on read-only traffic.
+        self._conn.execute("SET TimeZone='UTC'")
         attach_parquet_views(self._conn, parquet_root)
 
     # ─── Read path ──────────────────────────────────────────────────────────
@@ -52,6 +58,12 @@ class FeatureStore:
         ).pl()
 
     def query_news_for_symbol(self, symbol: str, since_utc: datetime) -> pl.DataFrame:
+        # Reject naive datetimes: DuckDB binds them as plain TIMESTAMP, which
+        # gets compared to TIMESTAMPTZ under the session TZ. Even though we
+        # pin UTC in __init__, accepting naive input leaves the caller guessing
+        # whether their local-time value was silently reinterpreted as UTC.
+        if since_utc.tzinfo is None or since_utc.tzinfo.utcoffset(since_utc) is None:
+            raise ValueError("since_utc must be timezone-aware (UTC); naive datetime forbidden")
         return self._conn.execute(
             "SELECT * FROM news WHERE symbol = ? AND published_at_utc >= ? "
             "ORDER BY published_at_utc",

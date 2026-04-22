@@ -91,6 +91,35 @@ def test_missing_output_dir_auto_created(tmp_path: Path) -> None:
     assert out.exists()
 
 
+def test_empty_exit_code_records_sentinel_and_exits_zero(tmp_path: Path) -> None:
+    """Review-flip fix: when systemd expands $EXIT_STATUS in a context where
+    the variable is unset (historical ExecStartPost= misuse, manual
+    systemd-run invocation, unit config churn), the arg arrives as the
+    empty string. Previously `int('')` raised and the emit step itself
+    failed — metric file never landed, alert never updated. Now the empty
+    string maps to the -1 sentinel so the exit_code gauge still reflects
+    an anomalous state."""
+    out = tmp_path / "m.prom"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--exit-code",
+            "",  # empty string — systemd variable expansion void
+            "--duration",
+            "0",
+            "--output",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert _parse_metric(out, "athena_logger_sync_last_exit_code") == -1
+
+
 def test_concurrent_writes_never_leave_torn_file(tmp_path: Path) -> None:
     # node_exporter's textfile scraper polls concurrently — the script writes
     # tmp + replace, so every observed state must be a complete metric set.

@@ -43,13 +43,17 @@ def attach_parquet_views(conn: duckdb.DuckDBPyConnection, parquet_root: Path) ->
 
 
 def _create_empty_view(conn: duckdb.DuckDBPyConnection, table: str) -> None:
+    # temporary=True makes `_empty_<table>` a TEMP (session-scoped) table,
+    # so it does NOT materialise into the persistent decisions.duckdb file.
+    # Without this, the view-attach step violates D1 / #PT-2 by dropping a
+    # persistent `_empty_ticks` (etc.) into the Trading PC write zone.
     empty_name = f"_empty_{table}"
     creator = {
         "ticks": create_ticks_table,
         "quotes": create_quotes_table,
         "news": create_news_table,
     }[table]
-    creator(conn, table_name=empty_name)
+    creator(conn, table_name=empty_name, temporary=True)
     conn.execute(
         f"CREATE OR REPLACE VIEW {table} AS SELECT * FROM {empty_name}"  # noqa: S608
     )

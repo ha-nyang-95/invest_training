@@ -45,3 +45,14 @@ def test_logger_sync_lag_high_alert_shape() -> None:
     assert rule["labels"]["severity"] == "high"
     assert "summary" in rule["annotations"]
     assert "description" in rule["annotations"]
+
+
+def test_alert_guards_against_missing_metric_series() -> None:
+    """Review-flip fix: without an `absent()` disjunct, a missing metric
+    series (e.g. emitter never ran post-reboot because venv path broke)
+    evaluates to no-data and the alert never fires — the worst failure
+    mode becomes invisible. The `absent()` branch fires immediately in
+    that case."""
+    doc = yaml.safe_load(RULES_FILE.read_text(encoding="utf-8"))
+    rule = doc["groups"][0]["rules"][0]
+    assert "absent(athena_logger_sync_last_success_seconds)" in rule["expr"]

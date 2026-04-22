@@ -12,12 +12,11 @@ Type=oneshot
 # the 60s boundary; --timeout=30 bounds a stuck connection.
 # logger-pc is a Host alias in ~/.ssh/config (IdentityFile points at the
 # dedicated id_ed25519_athena_sync key; separate from the signing key per NFR-S2).
-ExecStart=/usr/bin/rsync -a --partial --partial-dir=.rsync-partial --timeout=30 --bwlimit=0 logger-pc:/data/parquet/ /data/parquet/
-# Story 1.4 AC-5: emit Prometheus textfile-collector metric after every run
-# (including failures). Duration placeholder is 0 in V1.0 — accurate duration
-# measurement (cgroup cpu-time or wall-clock via ExecStartPre sentinel file)
-# is deferred to Story 1.9.
-ExecStartPost=/home/khuk0/invest_training/.venv/bin/python /home/khuk0/invest_training/scripts/emit_logger_sync_metric.py --exit-code $EXIT_STATUS --duration 0 --output /var/lib/node_exporter/textfile_collector/athena_logger_sync.prom
+# --delete-after: propagate Logger PC retention eviction (Story 1.10) to
+# Trading PC so disk does not grow unbounded; --max-delete=100 caps a runaway
+# purge (if Logger PC ever appears empty, at most 100 files are removed per
+# run, so a full wipe cannot happen silently).
+ExecStart=/usr/bin/rsync -a --partial --partial-dir=.rsync-partial --timeout=30 --bwlimit=0 --delete-after --max-delete=100 logger-pc:/data/parquet/ /data/parquet/
 StandardOutput=append:/var/log/athena/logger-sync.log
 StandardError=append:/var/log/athena/logger-sync.log
 User=khuk0
@@ -26,6 +25,14 @@ Group=khuk0
 # timer catches up); 30=timeout. Anything else (1, 11, 12, ...) surfaces
 # as failure in journal (Story 1.9 OnFailure= hook will route alerts).
 SuccessExitStatus=0 23 24 30
+# Story 1.4 AC-5: emit Prometheus textfile-collector metric after every run
+# (including failures). $EXIT_STATUS / $SERVICE_RESULT are populated by
+# systemd ONLY in ExecStopPost= (per systemd.service(5)) — using
+# ExecStartPost= leaves the variable empty and silently breaks the signal.
+# Duration placeholder is 0 in V1.0 — accurate duration measurement
+# (cgroup cpu-time or wall-clock via ExecStartPre sentinel file) is
+# deferred to Story 1.9.
+ExecStopPost=/home/khuk0/invest_training/.venv/bin/python /home/khuk0/invest_training/scripts/emit_logger_sync_metric.py --exit-code $EXIT_STATUS --duration 0 --output /var/lib/node_exporter/textfile_collector/athena_logger_sync.prom
 
 [Install]
 WantedBy=multi-user.target

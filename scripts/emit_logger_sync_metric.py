@@ -23,6 +23,22 @@ from pathlib import Path
 
 _SUCCESS_EXIT_CODES = frozenset({0, 23, 24, 30})
 _PREV_SUCCESS_PREFIX = "athena_logger_sync_last_success_seconds "
+# systemd populates $EXIT_STATUS in ExecStopPost= for Type=oneshot, but if the
+# unit aborts before the service phase (dependency failure, `systemd-run`
+# manual invocation, non-oneshot call path) the variable expands to empty.
+# -1 is the sentinel the rendered metric uses so alerts on
+# `athena_logger_sync_last_exit_code != 0` still fire.
+_UNKNOWN_EXIT_CODE = -1
+
+
+def _parse_exit_code(raw: str) -> int:
+    """argparse type= hook. Accepts empty string (from an unset $EXIT_STATUS
+    expansion) as -1 sentinel rather than raising — otherwise the emit step
+    itself would fail and the metric file would never land."""
+    stripped = raw.strip()
+    if not stripped:
+        return _UNKNOWN_EXIT_CODE
+    return int(stripped)
 
 
 def _read_prev_last_success(path: Path) -> int:
@@ -53,7 +69,7 @@ def _render_body(last_success: int, exit_code: int, duration: float) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Emit rsync-sync Prometheus textfile metrics")
-    ap.add_argument("--exit-code", type=int, required=True)
+    ap.add_argument("--exit-code", type=_parse_exit_code, required=True)
     ap.add_argument("--duration", type=float, required=True)
     ap.add_argument("--output", type=Path, required=True)
     args = ap.parse_args()

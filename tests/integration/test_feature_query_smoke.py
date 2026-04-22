@@ -155,3 +155,58 @@ def test_decisions_db_created_under_parent_dir(parquet_fixture: Path, tmp_path: 
     # Verify we can re-open after close
     conn = open_decisions_duckdb(db_path)
     conn.close()
+
+
+def test_session_timezone_pinned_to_utc(parquet_fixture: Path, tmp_path: Path) -> None:
+    """Review-flip fix: FeatureStore.__init__ must set session TZ to UTC.
+    Without this, DuckDB `now()` and TIMESTAMPTZ comparisons use the OS
+    default (WSL2 ships Asia/Seoul) and query_recent_ticks filters by a
+    9-hour-skewed window, silently returning empty results."""
+    fs = FeatureStore(tmp_path / "decisions.duckdb", parquet_fixture)
+    tz = fs._conn.execute("SELECT current_setting('TimeZone')").fetchone()  # noqa: SLF001
+    fs.close()
+    assert tz is not None
+    assert tz[0] == "UTC"
+
+
+def test_query_news_rejects_naive_datetime(parquet_fixture: Path, tmp_path: Path) -> None:
+    """Review-flip fix: naive datetime binds as TIMESTAMP (session-TZ)
+    against a TIMESTAMPTZ column — even with session UTC, the caller's
+    intent is ambiguous. Force tz-aware input at the API boundary."""
+    from datetime import datetime as _dt  # local import — test-scope only
+
+    fs = FeatureStore(tmp_path / "decisions.duckdb", parquet_fixture)
+    try:
+        with pytest.raises(ValueError, match="timezone-aware"):
+            # Naive datetime is the point of the test (probe the guard).
+            fs.query_news_for_symbol("005930", _dt(2026, 4, 21, 9, 0, 0))  # noqa: DTZ001
+    finally:
+        fs.close()
+
+
+def test_empty_view_does_not_persist_to_decisions_db(tmp_path: Path) -> None:
+    """Review-flip fix (D1 / #PT-2 invariant): when parquet_root has zero
+    shards, the fallback _empty_<table> must be a TEMP (session-scoped)
+    table — NOT a persistent table written into decisions.duckdb. A
+    persistent _empty_* widens the Trading PC write scope silently."""
+    decisions_db = tmp_path / "decisions.duckdb"
+    empty_root = tmp_path / "empty_parquet_root"
+    fs = FeatureStore(decisions_db, empty_root)
+    fs.close()
+    # Re-open decisions.duckdb with a fresh connection — TEMP tables from the
+    # prior FeatureStore session must not be visible.
+    conn = open_decisions_duckdb(decisions_db)
+    try:
+        persistent = {
+            row[0]
+            for row in conn.execute(
+                "SELECT table_name FROM duckdb_tables() WHERE temporary = false"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+    leaked = {t for t in persistent if t.startswith("_empty_")}
+    assert not leaked, (
+        f"_empty_* leaked into persistent decisions.duckdb schema: {leaked}; "
+        "must be CREATE TEMP TABLE (see parquet_reader._create_empty_view)"
+    )

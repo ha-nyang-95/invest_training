@@ -20,6 +20,7 @@ regeneration requires manual file deletion + re-run (audit-evident).
 from __future__ import annotations
 
 import hashlib
+import os
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -102,11 +103,23 @@ def _data_equals(existing: pl.DataFrame, fresh: pl.DataFrame) -> bool:
     writer version). The semantic contract of mode='check' is data identity,
     which we verify by reading the existing shard back and comparing sorted
     frames column-by-column.
+
+    Robustness notes:
+    - `null_equal=True`: two NULLs at the same cell compare equal (Polars
+      default treats NULL != NULL per SQL semantics — wrong for shard parity).
+    - `nulls_last=True` on sort: stable, platform-independent null ordering.
+    - Row-count prefilter: short-circuits a common drift class (one frame has
+      a duplicate or dropped row) that sort+equals alone can miss if the
+      sort keys collide.
     """
     cols = sorted(existing.columns)
     if sorted(fresh.columns) != cols:
         return False
-    return existing.select(cols).sort(cols).equals(fresh.select(cols).sort(cols))
+    if existing.height != fresh.height:
+        return False
+    e = existing.select(cols).sort(cols, nulls_last=True)
+    f = fresh.select(cols).sort(cols, nulls_last=True)
+    return e.equals(f, null_equal=True)
 
 
 def export_hour_shard(
@@ -120,6 +133,12 @@ def export_hour_shard(
     """Export one (table, hour) slice as per-symbol Parquet files under out_root."""
     if table not in _TIME_COL:
         raise ValueError(f"Unknown table {table!r}; expected one of {sorted(_TIME_COL)}")
+    # Guard against naive datetimes: DuckDB binds a naive python datetime as a
+    # plain TIMESTAMP (session-TZ interpreted) against a TIMESTAMPTZ column, so
+    # a KST-host call with naive input silently shifts the window by 9h and
+    # returns zero rows — data loss invisible until the downstream query.
+    if hour_utc_start.tzinfo is None or hour_utc_start.tzinfo.utcoffset(hour_utc_start) is None:
+        raise ValueError("hour_utc_start must be timezone-aware (UTC); naive datetime forbidden")
 
     t0 = time.perf_counter()
     hour_end = hour_utc_start + timedelta(hours=1)
@@ -182,7 +201,22 @@ def export_hour_shard(
             )
 
         out_file.parent.mkdir(parents=True, exist_ok=True)
-        sub_df.write_parquet(out_file, compression="zstd", compression_level=3)
+        # Atomic write: if the Logger PC is killed mid-write (power cut, OOM,
+        # systemd timeout) a direct write to `out_file` leaves a truncated
+        # Parquet behind, and the next hour's mode='fail' call sees it as
+        # SHARD_ALREADY_EXISTS — permanently blocking that hour's export
+        # until an operator deletes the corrupt file. rsync may also ship
+        # the truncated file onward. Writing to a PID-suffixed tmp file
+        # then atomically renaming keeps `out_file.exists()` false until
+        # the Parquet is valid. See emit_logger_sync_metric.py for the
+        # same pattern on the observability side.
+        tmp_file = out_file.with_suffix(f"{out_file.suffix}.tmp.{os.getpid()}")
+        try:
+            sub_df.write_parquet(tmp_file, compression="zstd", compression_level=3)
+            tmp_file.replace(out_file)
+        except BaseException:
+            tmp_file.unlink(missing_ok=True)
+            raise
         files_written += 1
         bytes_written += out_file.stat().st_size
         symbols_written.append(part_sym)

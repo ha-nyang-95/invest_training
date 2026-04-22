@@ -47,6 +47,39 @@ def test_service_exec_start_is_rsync_with_logger_pc_source() -> None:
     assert "--timeout=30" in exec_start
 
 
+def test_service_exec_start_has_bounded_delete() -> None:
+    """Review-flip fix: --delete-after propagates Logger PC retention
+    eviction without unbounded blast radius. --max-delete caps accidental
+    mass-wipe so a Logger PC empty-directory misconfiguration cannot
+    silently nuke the Trading PC cache."""
+    cp = _parse_unit(SERVICE_FILE)
+    exec_start = cp.get("Service", "ExecStart")
+    assert "--delete-after" in exec_start
+    assert "--max-delete=" in exec_start
+
+
+def test_service_emits_metric_from_exec_stop_post_not_start_post() -> None:
+    """Review-flip fix: $EXIT_STATUS is populated by systemd ONLY in
+    ExecStopPost= (systemd.service(5)). ExecStartPost= leaves the variable
+    empty — the metric emitter would then write exit_code=-1 on every run
+    regardless of the rsync outcome. See emit_logger_sync_metric.py
+    `_parse_exit_code` for the empty-string sentinel."""
+    cp = _parse_unit(SERVICE_FILE)
+    assert cp.has_option("Service", "ExecStopPost"), (
+        "emit_logger_sync_metric.py must run under ExecStopPost= to capture $EXIT_STATUS"
+    )
+    exec_stop_post = cp.get("Service", "ExecStopPost")
+    assert "emit_logger_sync_metric.py" in exec_stop_post
+    assert "$EXIT_STATUS" in exec_stop_post
+    # And NOT under ExecStartPost=
+    if cp.has_option("Service", "ExecStartPost"):
+        exec_start_post = cp.get("Service", "ExecStartPost")
+        assert "emit_logger_sync_metric.py" not in exec_start_post, (
+            "emit_logger_sync_metric.py must not run under ExecStartPost= "
+            "(silent $EXIT_STATUS void); use ExecStopPost= instead"
+        )
+
+
 def test_service_success_exit_status_covers_transients() -> None:
     cp = _parse_unit(SERVICE_FILE)
     # exit 0=success, 23/24=partial, 30=timeout — all swallowed so next
