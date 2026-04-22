@@ -40,6 +40,11 @@ addopts = [
 ]
 testpaths = ["packages", "tests"]
 asyncio_mode = "auto"
+markers = [
+    "integration: cross-package integration test (CI stage-3), mock KIS only",
+    "snapshot: historical-failure S_entry regression (CI stage-4), Story 2.1 fixture required",
+    "walk_forward: walk-forward backtest smoke (CI stage-5), Story 8.3 runner required",
+]
 
 # ruff: AR-CQ1 + Enforcement #3/#4/#6 banned-api
 [tool.ruff]
