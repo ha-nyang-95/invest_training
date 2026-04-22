@@ -1,0 +1,198 @@
+"""Hourly append-only Parquet shard export from features_logger.duckdb.
+
+Source: Story 1.4 AC-2; architecture.md#D1 (hot DuckDB + cold Parquet + rsync),
+#Naming-Patterns line 412 (`{table}/year=YYYY/month=MM/day=DD/hour=HH/symbol=XXX.parquet`).
+
+Runs on Logger PC. Called once per hour (XX:01 cron) for the prior UTC hour.
+One parquet file per (table, symbol) pair per hour; empty symbols skipped. News
+rows with `symbol IS NULL` land under the literal `symbol=__NULL__` partition.
+
+Idempotency contract:
+- mode="fail"  — re-calling with data already written raises ShardOverwriteError.
+- mode="check" — re-writes to tmp + reads existing, compares dataframes for
+  data equality. Drift raises ShardDriftError with the existing file's SHA-256
+  in context for the operator.
+
+Architectural invariant #4: once a shard is written, it is immutable. Forced
+regeneration requires manual file deletion + re-run (audit-evident).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Literal
+
+import duckdb
+import polars as pl
+from pydantic import BaseModel, ConfigDict
+
+_SYMBOL_NULL_SENTINEL = "__NULL__"
+_TIME_COL: dict[str, str] = {
+    "ticks": "timestamp",
+    "quotes": "timestamp",
+    "news": "published_at_utc",
+}
+
+
+class ShardExportResult(BaseModel):
+    """Result of one export_hour_shard call (one table, one hour)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    table: str
+    hour_utc: datetime
+    files_written: int
+    files_matched: int
+    bytes_written: int
+    symbols: tuple[str, ...]
+    duration_seconds: float
+
+
+class ShardError(Exception):
+    """Base class for shard-export errors. Subclasses set a stable error_code."""
+
+    error_code: str = "SHARD_UNKNOWN"
+
+    def __init__(self, message: str, **context: Any) -> None:
+        super().__init__(message)
+        self.context: dict[str, Any] = context
+
+
+class ShardOverwriteError(ShardError):
+    """Raised in mode='fail' when a shard file already exists at the target path.
+
+    Defends architecture.md invariant: prior-hour files are never modified.
+    """
+
+    error_code = "SHARD_ALREADY_EXISTS"
+
+
+class ShardDriftError(ShardError):
+    """Raised in mode='check' when existing shard data differs from fresh query."""
+
+    error_code = "SHARD_DRIFT"
+
+
+def _partition_dir(out_root: Path, table: str, hour: datetime) -> Path:
+    return (
+        out_root
+        / table
+        / f"year={hour.year:04d}"
+        / f"month={hour.month:02d}"
+        / f"day={hour.day:02d}"
+        / f"hour={hour.hour:02d}"
+    )
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fp:
+        for chunk in iter(lambda: fp.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _data_equals(existing: pl.DataFrame, fresh: pl.DataFrame) -> bool:
+    """Order-insensitive, column-order-insensitive data comparison.
+
+    Parquet file bytes are not deterministic across writes (row-group metadata,
+    writer version). The semantic contract of mode='check' is data identity,
+    which we verify by reading the existing shard back and comparing sorted
+    frames column-by-column.
+    """
+    cols = sorted(existing.columns)
+    if sorted(fresh.columns) != cols:
+        return False
+    return existing.select(cols).sort(cols).equals(fresh.select(cols).sort(cols))
+
+
+def export_hour_shard(
+    conn: duckdb.DuckDBPyConnection,
+    table: str,
+    hour_utc_start: datetime,
+    out_root: Path,
+    *,
+    mode: Literal["fail", "check"] = "fail",
+) -> ShardExportResult:
+    """Export one (table, hour) slice as per-symbol Parquet files under out_root."""
+    if table not in _TIME_COL:
+        raise ValueError(f"Unknown table {table!r}; expected one of {sorted(_TIME_COL)}")
+
+    t0 = time.perf_counter()
+    hour_end = hour_utc_start + timedelta(hours=1)
+    time_col = _TIME_COL[table]
+
+    # `table` and `time_col` both come from the fixed _TIME_COL whitelist above,
+    # so the f-string cannot be user-controlled SQL. Parameter binding is used
+    # for the time range bounds (DuckDB handles TIMESTAMPTZ as a bind parameter).
+    df = conn.execute(
+        f"SELECT * FROM {table} "  # noqa: S608
+        f'WHERE "{time_col}" >= ? AND "{time_col}" < ? '
+        f'ORDER BY symbol NULLS LAST, "{time_col}"',
+        [hour_utc_start, hour_end],
+    ).pl()
+
+    partition_dir = _partition_dir(out_root, table, hour_utc_start)
+    if df.is_empty():
+        return ShardExportResult(
+            table=table,
+            hour_utc=hour_utc_start,
+            files_written=0,
+            files_matched=0,
+            bytes_written=0,
+            symbols=(),
+            duration_seconds=time.perf_counter() - t0,
+        )
+
+    files_written = 0
+    files_matched = 0
+    bytes_written = 0
+    symbols_written: list[str] = []
+
+    unique_syms = df.select("symbol").unique(maintain_order=True).get_column("symbol").to_list()
+    for sym_value in unique_syms:
+        sub_df = (
+            df.filter(pl.col("symbol").is_null())
+            if sym_value is None
+            else df.filter(pl.col("symbol") == sym_value)
+        )
+        if sub_df.is_empty():
+            continue
+        part_sym = _SYMBOL_NULL_SENTINEL if sym_value is None else str(sym_value)
+        out_file = partition_dir / f"symbol={part_sym}.parquet"
+
+        if out_file.exists():
+            if mode == "fail":
+                raise ShardOverwriteError(
+                    f"Shard already exists: {out_file}",
+                    path=str(out_file),
+                    existing_sha256=_sha256_file(out_file),
+                )
+            existing = pl.read_parquet(out_file)
+            if _data_equals(existing, sub_df):
+                files_matched += 1
+                continue
+            raise ShardDriftError(
+                f"Shard data drift: {out_file}",
+                path=str(out_file),
+                existing_sha256=_sha256_file(out_file),
+            )
+
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        sub_df.write_parquet(out_file, compression="zstd", compression_level=3)
+        files_written += 1
+        bytes_written += out_file.stat().st_size
+        symbols_written.append(part_sym)
+
+    return ShardExportResult(
+        table=table,
+        hour_utc=hour_utc_start,
+        files_written=files_written,
+        files_matched=files_matched,
+        bytes_written=bytes_written,
+        symbols=tuple(symbols_written),
+        duration_seconds=time.perf_counter() - t0,
+    )

@@ -7,6 +7,10 @@ dependencies = [
     "athena-core",
     "polars>=1",
     "duckdb>=1",
+    # DuckDB <-> Polars zero-copy bridge (`conn.execute(...).pl()`) uses
+    # pyarrow internally. Explicit pin: polars 1.x no longer pulls pyarrow
+    # transitively. Story 1.4 AC-2 relies on the bridge in export_hour_shard.
+    "pyarrow>=17",
 ]
 
 [build-system]
