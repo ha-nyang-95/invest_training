@@ -90,6 +90,14 @@ Items intentionally deferred from code reviews and implementation. Each entry ci
 
 - **`tests/integration/test_parquet_shard_export.py` 가 repo root 에 `--out-root` orphan DuckDB 파일 생성** — Story 1.4 review-flip (commit b25d80a) 에서 미발견. `pytest tests/integration/test_parquet_shard_export.py` 단독 실행 시 12,288 바이트 DuckDB 파일이 working-directory 루트에 반복 생성됨. 원인 후보: `_run_cli` 가 `subprocess.run(cwd=repo_root, ...)` 로 CLI 를 기동하는 경로 중 일부에서 `duckdb.connect("--out-root")` 가 호출되는 argparse/인자 순서 버그 또는 side-effect. 즉시 조치: `.gitignore` 에 `/--out-root` 패턴 추가하여 커밋 오염 차단. 근본 원인 수사는 Story 1.4 재개 세션 또는 별도 bugfix 스토리에서 수행. **Story 1.5 review-flip blocker 아님** — `.gitignore` 으로 블래스트 radius 차단.
 
+## Gemini Code Assist bot 자동 리뷰 findings — PR #10 (Story 1.5 merge, 2026-04-23)
+
+PR #10 merge 시 `required_conversation_resolution: true` branch-protection 해제를 위해 3개 review thread 를 resolve 처리했으나 **실 코드 수정은 수행하지 않음** — 지적 자체는 유효 (3건 모두 medium priority, performance/memory 범주) 하며 V1.0 scope 에서는 OOM/roundtrip 영향 미미하므로 follow-up bugfix 스토리 또는 Story 6.1 full LedgerWriter 구현 시점에 일괄 반영 권장. 원 thread ID: `PRRT_kwDOSGvmD858_9IO` / `858_9IW` / `858_9IZ`.
+
+- **`packages/athena-execution/athena/execution/ledger/client.py:146-152` — `SELECT currval('seq_pre_trade_ledger_id')` 별도 query 대신 `INSERT ... RETURNING id` 사용 권장** — 1 roundtrip 감소 + session-local `currval` state 의존 제거 (V1.0 단일 asyncio 프로세스에서는 비관련, V1.1+ multi-connection 에서는 필수). DuckDB 1.x `RETURNING` 지원 확인 완료. **조치 후보**: `client.append` 의 마지막 `SELECT currval` 호출 삭제 + `INSERT ... RETURNING id` 의 `fetchone()` 으로 id 수령. Low-medium priority — Story 6.1 full LedgerWriter 가 append path 를 통째로 재작성할 때 같이 처리.
+- **`packages/athena-execution/athena/execution/ledger/segment_hash.py:65-74` — `fetchall()` 대신 cursor iteration + shadowing 방지용 `i` 변수** — 월당 entries 가 많아질 경우 (V1.0 기준 월 수천 건, Story 6.1+ 로 확장 시 월 수만-수십만 건 가능) `fetchall()` 이 전체 결과를 메모리에 적재 → OOM 위험. 또한 `str(id)` 의 `id` 는 Python builtin 과 shadow. **조치 후보**: `for (eid,) in conn.execute(...):` 직접 iteration + `i` 또는 `eid` 로 rename. V1.0 low priority — verify_ledger 패턴과 함께 일괄 수정 권장.
+- **`scripts/verify_ledger.py:39-76` — `rows = ... .fetchall()` 대신 cursor iteration** — Ledger 가 N 년간 성장하면 전체 체인이 수백만 건 ~ 수천만 건 될 수 있음. `fetchall` 은 모두 메모리 로드 → 검증 스크립트 OOM. **조치 후보**: `res = conn.execute(...); for row in res:` 로 iterator. 현재 `last_this` 상태 기계는 unchanged. Medium priority — Story 6.2 3-way verify 설계 시점에 필수 처리 (3-way 는 더 큰 메모리 범위). 본 스토리는 V1.0 scope 에서 bypass.
+
 ## Gemini Code Assist bot 자동 리뷰 findings — PR #11 (Story 1.4 merge, 2026-04-23)
 
 PR #11 merge 시 `required_conversation_resolution: true` branch-protection 해제를 위해 4개 review thread 를 resolve 처리했으나 **실 코드 수정은 수행하지 않음** — 지적 자체는 유효하며 follow-up bugfix 스토리에서 처리 권장. 원 comment ID 들: `PRRT_kwDOSGvmD859AJER` / `859AJEV` / `859AJEg` / `859AJEk`.
