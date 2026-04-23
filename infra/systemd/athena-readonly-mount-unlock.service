@@ -12,14 +12,15 @@ ConditionPathExists=/var/lib/athena/policy/flag_registry.toml
 Type=oneshot
 User=khuk0
 Group=khuk0
-ExecStartPre=/home/khuk0/invest_training/.venv/bin/python /home/khuk0/invest_training/scripts/check_trading_day.py
+# ExecCondition= silently skips on non-trading days; see lock.service for the
+# SuccessExitStatus-whitelist-bug rationale. Post-CR fix (2026-04-23).
+ExecCondition=/home/khuk0/invest_training/.venv/bin/python /home/khuk0/invest_training/scripts/check_trading_day.py
 ExecStart=/home/khuk0/invest_training/.venv/bin/python -m athena.alpha_defense.f5 unlock
 ExecStopPost=/home/khuk0/invest_training/.venv/bin/python /home/khuk0/invest_training/scripts/emit_readonly_mount_metric.py --action unlock --exit-code $EXIT_STATUS --output /var/lib/node_exporter/textfile_collector/athena_readonly_mount.prom
 StandardOutput=append:/var/log/athena/readonly-mount.log
 StandardError=append:/var/log/athena/readonly-mount.log
 Restart=on-failure
 RestartSec=30s
-SuccessExitStatus=0 1
 
 [Install]
 WantedBy=multi-user.target

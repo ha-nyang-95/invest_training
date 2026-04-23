@@ -30,13 +30,9 @@ UNLOCK_TIMER=athena-readonly-mount-unlock.timer
 SUDOERS_FILE=athena-readonly-mount
 
 dry() { echo "[dry-run] $*"; }
-run() {
-  if [[ "$DRY_RUN" == "1" ]]; then
-    dry "$*"
-  else
-    eval "$@"
-  fi
-}
+# Post-CR fix (2026-04-23): the previous `run()` helper used `eval "$@"` which
+# is an argv-injection footgun and had zero callers in the actual install
+# flow. Removed to eliminate the attack surface.
 
 # 1) Host preflight ----------------------------------------------------------
 preflight() {
@@ -70,7 +66,18 @@ seed_policy_dir() {
   # — overwriting from `config/` would clobber that work. Story 1.10 will
   # automate the safe re-sync.
   if [[ ! -f "$POLICY_DIR/policy.toml" ]]; then
-    sudo install -m 644 -o khuk0 -g khuk0 "$SRC_CONFIG/policy.toml" "$POLICY_DIR/policy.toml"
+    if [[ -f "$SRC_CONFIG/policy.toml" ]]; then
+      sudo install -m 644 -o khuk0 -g khuk0 "$SRC_CONFIG/policy.toml" "$POLICY_DIR/policy.toml"
+    else
+      # Post-CR fix (2026-04-23): mirror the flag_registry.toml graceful
+      # fallback. `config/policy.toml` is tracked in the repo, but a partial
+      # checkout or unusual CI bootstrap can leave it absent — previously
+      # `set -e` would abort here, leaving /var/lib/athena/policy half-seeded.
+      printf "# Empty stub — real parameters populated by Story 2.8 (S_entry).\n" |
+        sudo tee "$POLICY_DIR/policy.toml" >/dev/null
+      sudo chown khuk0:khuk0 "$POLICY_DIR/policy.toml"
+      sudo chmod 644 "$POLICY_DIR/policy.toml"
+    fi
   fi
   if [[ ! -f "$POLICY_DIR/flag_registry.toml" ]]; then
     if [[ -f "$SRC_CONFIG/flag_registry.toml" ]]; then
@@ -118,19 +125,26 @@ install_sudoers() {
   # visudo -cf is non-destructive — bad syntax leaves /etc/sudoers untouched.
   # Some distros let visudo -cf run without sudo (it only reads the given
   # file); others require root. We try the unprivileged path first, then
-  # fall back to sudo. In DRY_RUN we skip the real check entirely: CI
-  # runners often have no interactive sudo, and the real install path
-  # still validates before touching /etc/sudoers.d/.
-  if [[ "$DRY_RUN" == "1" ]]; then
-    dry "visudo -cf $src (validate sudoers syntax)"
-    dry "install -m 0440 -o root -g root $src -> $SUDOERS_DIR/$SUDOERS_FILE"
-    return
-  fi
+  # fall back to sudo if it's available. Post-CR fix (2026-04-23): the
+  # previous DRY_RUN path echoed the validation step without actually running
+  # it, so a broken sudoers file would pass CI and only surface on the real
+  # trading-PC install — where a mis-syntaxed drop-in can lock the operator
+  # out of sudo entirely. Now we always run `visudo -cf` (a read-only
+  # operation that does not require sudo) and fail dry-run loudly on syntax
+  # errors, matching the README's "non-negotiable" claim.
   if ! visudo -cf "$src" >/dev/null 2>&1; then
-    if ! sudo visudo -cf "$src" >/dev/null; then
+    # Retry with sudo if available (some distros gate visudo behind root).
+    if command -v sudo >/dev/null 2>&1 && sudo -n visudo -cf "$src" >/dev/null 2>&1; then
+      : # validated via sudo path
+    else
       echo "ERROR: visudo -cf failed on $src — refusing to install." >&2
       exit 1
     fi
+  fi
+  if [[ "$DRY_RUN" == "1" ]]; then
+    dry "visudo -cf $src -> OK (validated)"
+    dry "install -m 0440 -o root -g root $src -> $SUDOERS_DIR/$SUDOERS_FILE"
+    return
   fi
   if [[ -f "$SUDOERS_DIR/$SUDOERS_FILE" ]] && cmp -s "$src" "$SUDOERS_DIR/$SUDOERS_FILE"; then
     echo "skip sudoers/$SUDOERS_FILE (already installed and identical)"

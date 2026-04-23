@@ -53,15 +53,23 @@ def test_lock_service_runs_chattr_via_python_module() -> None:
     exec_start = cp.get("Service", "ExecStart")
     assert "athena.alpha_defense.f5" in exec_start
     assert exec_start.rstrip().endswith(" lock")
-    # ExecStartPre routes through check_trading_day so weekend/holiday skips.
-    assert "check_trading_day.py" in cp.get("Service", "ExecStartPre")
+    # Post-CR fix (2026-04-23): holiday gate is now ExecCondition= (systemd
+    # 242+). Previous ExecStartPre= + SuccessExitStatus=0 1 was buggy —
+    # whitelist applied to all Exec* children, so exit 1 was treated as
+    # success and ExecStart ran anyway. ExecCondition exit 1-254 silently
+    # skips without failing the unit.
+    assert "check_trading_day.py" in cp.get("Service", "ExecCondition")
+    assert not cp.has_option("Service", "ExecStartPre"), (
+        "ExecStartPre removed in post-CR fix — use ExecCondition for the trading-day gate"
+    )
 
 
 def test_unlock_service_is_symmetric_to_lock() -> None:
     cp = _parse_unit(UNLOCK_SERVICE)
     exec_start = cp.get("Service", "ExecStart")
     assert exec_start.rstrip().endswith(" unlock")
-    assert "check_trading_day.py" in cp.get("Service", "ExecStartPre")
+    assert "check_trading_day.py" in cp.get("Service", "ExecCondition")
+    assert not cp.has_option("Service", "ExecStartPre")
 
 
 def test_both_services_emit_metric_in_exec_stop_post() -> None:
@@ -90,12 +98,21 @@ def test_unlock_timer_fires_at_kst_close_only_on_weekdays() -> None:
     assert cp.get("Timer", "Persistent") == "false"
 
 
-def test_services_treat_skip_exit_1_as_success() -> None:
-    """SuccessExitStatus=0 1 means check_trading_day.py exit 1 (non-trading
-    day) does NOT trip Restart= or alert rules — see Invariant #5."""
+def test_services_do_not_use_success_exit_status_whitelist() -> None:
+    """Post-CR fix (2026-04-23): `SuccessExitStatus=0 1` was the old holiday
+    skip mechanism but it applied to ALL Exec* commands (systemd's
+    `service_exit_code_status_is_ok` is called for each child), so exit 1 was
+    being treated as success across the board and ExecStart ran anyway on
+    holidays. Also collided with the CLI's own PARTIAL → exit 1 path, silently
+    whitelisting genuine chattr failures. The holiday gate now lives in
+    ExecCondition= (which natively supports skip-without-fail), and a CLI
+    exit 1 is once again an unambiguous failure that trips Restart=on-failure.
+    """
     for unit in (LOCK_SERVICE, UNLOCK_SERVICE):
         cp = _parse_unit(unit)
-        assert cp.get("Service", "SuccessExitStatus").strip() == "0 1"
+        assert not cp.has_option("Service", "SuccessExitStatus"), (
+            f"{unit.name} must not whitelist exit codes — see post-CR fix rationale"
+        )
 
 
 def test_services_run_as_khuk0_not_root() -> None:

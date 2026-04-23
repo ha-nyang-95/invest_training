@@ -18,25 +18,30 @@ Type=oneshot
 User=khuk0
 Group=khuk0
 # Skip on KRX non-trading days (weekends + KR public holidays + extra-closed).
-# exit 1 from this script is treated as service failure by systemd, but we
-# WANT a "skip" to look like a clean no-op in the journal — see SuccessExitStatus
-# below which whitelists exit 1 from check_trading_day so it doesn't trip
-# Restart= or alert rules.
-ExecStartPre=/home/khuk0/invest_training/.venv/bin/python /home/khuk0/invest_training/scripts/check_trading_day.py
+# ExecCondition= (systemd 242+) exits 1-254 = skip the unit silently (NOT
+# failure), 0 = proceed. Previous design used ExecStartPre + SuccessExitStatus=0 1
+# but SuccessExitStatus actually whitelists the exit code for ALL Exec* children
+# (service_exit_code_status_is_ok in systemd source), so exit 1 was being
+# treated as success and ExecStart ran anyway — policy was getting locked on
+# holidays. ExecCondition= is the correct primitive. Post-CR fix (2026-04-23).
+ExecCondition=/home/khuk0/invest_training/.venv/bin/python /home/khuk0/invest_training/scripts/check_trading_day.py
 # Real chattr +i — Python wrapper (single entrypoint per Story 1.6 Invariant #3).
 ExecStart=/home/khuk0/invest_training/.venv/bin/python -m athena.alpha_defense.f5 lock
 # Emit Prometheus textfile metric AFTER the transition (success or failure).
 # $EXIT_STATUS is populated only in ExecStopPost (per systemd.service(5)).
+# Note: ExecStopPost does NOT run when ExecCondition skips the unit — on
+# holidays the textfile collector keeps the prior value, which is accurate
+# (state did not change). Prometheus alert rules (Story 1.9) must tolerate
+# weekend/holiday gaps in last_transition age.
 ExecStopPost=/home/khuk0/invest_training/.venv/bin/python /home/khuk0/invest_training/scripts/emit_readonly_mount_metric.py --action lock --exit-code $EXIT_STATUS --output /var/lib/node_exporter/textfile_collector/athena_readonly_mount.prom
 StandardOutput=append:/var/log/athena/readonly-mount.log
 StandardError=append:/var/log/athena/readonly-mount.log
 # Retry once on partial failure (e.g. one file briefly busy). lock() is
 # idempotent so a second run reconciles already-locked + retried-failed paths.
+# With SuccessExitStatus removed, a genuine CLI exit 1 (PARTIAL) correctly
+# fails the unit and Restart=on-failure now actually triggers.
 Restart=on-failure
 RestartSec=30s
-# Treat ExecStartPre's "skip — non-trading day" exit 1 as success so systemd
-# does not flag the unit failed and the metric emitter still records the no-op.
-SuccessExitStatus=0 1
 
 [Install]
 WantedBy=multi-user.target
