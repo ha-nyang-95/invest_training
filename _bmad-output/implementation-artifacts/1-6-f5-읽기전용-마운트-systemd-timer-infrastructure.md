@@ -1,6 +1,6 @@
 # Story 1.6: F5 읽기전용 마운트 systemd Timer Infrastructure
 
-Status: review
+Status: done
 
 Epic: 1 — Foundation & Market Truth Capture
 Story Key: `1-6-f5-읽기전용-마운트-systemd-timer-infrastructure`
@@ -441,12 +441,12 @@ so that **Story 3.5 의 inotify watcher 가 본 스토리의 `/var/lib/athena/po
   - [x] 5.9 `uv build --wheel --package athena-alpha-defense` — wheel 97B `__init__` + 730B `f5/__init__` + 150B `__main__` + 5487B `cli.py` + 6872B `metrics.py` + 3006B `override_event.py` + 11803B `readonly_mount.py` 포함 확인
   - [ ] 5.10 WSL2 signed commit: `chore(story-1.6): F5 readonly-mount infra verified, hand off to Story 1.7` — Task 6 일괄 위임
 
-- [ ] **Task 6** — Hand-off verification (본 스토리 merge 준비) — **WSL2 세션 필요**
-  - [ ] 6.1 WSL2 측에서 branch `story-1.6/f5-readonly-mount` 생성 + 5 signed commits 분할 (1.11 alpha-defense Python / 2.9 infra systemd / 3.5 WSL2 test / 4.5 inotify + override_event / 5.10 story-1.6 wrap)
-  - [ ] 6.2 PR 생성 — title `feat(story-1.6): F5 readonly-mount systemd timer infrastructure (AC-1~5)`, body 에 5 ACs 요약 + File List + 5-gate 로그 (본 문서 기반)
-  - [ ] 6.3 CI 7-stage green 확인 (self-hosted runner, cooling gate 미발동 — `policy:` prefix 없음, infra 변경만)
-  - [ ] 6.4 Gemini bot review 응답 방침: Story 1.5 패턴 (medium-priority finding 은 deferred-work, critical/major 는 patch)
-  - [ ] 6.5 PR merge 후 `sprint-status.yaml` `1-6-*: done`, last_updated 업데이트 (본 Task 는 merge 후 별도 commit)
+- [x] **Task 6** — Hand-off verification (본 스토리 merge 완료) — WSL2 via wsl.exe 위임 자동 실행
+  - [x] 6.1 WSL2 (`wsl.exe -d Ubuntu -- bash -lc ...`) 에서 branch `story-1.6/f5-readonly-mount` 생성 + 7 signed commits: 4 initial 분할 (`feat(alpha-defense)` / `feat(infra)` / `test(alpha-defense)` / `chore(story-1.6)`) + 3 fix commits (`fix(ci)` systemd-analyze tolerance + install.sh DRY_RUN / `fix(infra)` inotify Documentation= URL format / `fix(alpha-defense)` Gemini 3 findings patch)
+  - [x] 6.2 PR #13 생성 — title `feat(story-1.6): F5 readonly-mount systemd timer infrastructure (AC-1~5)`, body 는 `--body-file` 로 전달 (heredoc backtick 회피)
+  - [x] 6.3 CI 7-stage green — stage-1 pre-commit pass / stage-2 pytest-unit pass / stage-3 pytest-integration pass / stage-4 snapshot-regression pass (skip marker) / stage-5 walk-forward-smoke pass (skip marker) / stage-6 cooling-gate pass (no `policy:` prefix) / stage-7 paper-replay-marker pass
+  - [x] 6.4 Gemini bot 3 findings (1 HIGH emit_readonly_mount_metric + 2 MEDIUM metrics.py / readonly_mount.py) **모두 patch** (Story 1.5 의 deferred 우선 패턴이 아닌 적극 inline 수정 — Story 1.6 은 review-flip 직후 merge 이므로 시간 압박 부재) + 3 review threads `resolveReviewThread` GraphQL mutation 로 해결
+  - [x] 6.5 PR #13 `gh pr merge --squash --delete-branch` 로 merge (d7833c5). 본 commit (chore(story-1.6): done) 이 sprint-status.yaml 의 `1-6-*: review → done` + 본 파일 `Status: review → done` 전환 수행, 별도 PR 생성
 
 ## Dev Notes
 
@@ -853,4 +853,5 @@ Claude Opus 4.7 (1M context) — `claude-opus-4-7[1m]` — invoked via `/bmad-ag
 |---|---|---|---|
 | 2026-04-23 | 0.1.0 | Story 1.6 file created from epics.md lines 592-623 (ready-for-dev). Comprehensive context engine analysis: 11 Source-of-Truth Invariants (2-file protected set V1.0 lock, `/var/lib/athena/policy/` ext4 location vs git-tracked `config/`, ChattrExecutor single-entry + Protocol abstraction, MountState 3-state LOCKED/UNLOCKED/PARTIAL, systemd OnCalendar KST timezone requirement, Persistent=false missed-fire policy, sudoers wildcard-free NOPASSWD 4-entry enumeration, User=khuk0+sudo vs User=root tradeoff, holidays library selection vs hardcoded TOML, OverrideAttemptEvent Story 3.5/3.1 consume contract, Prometheus metric naming SSOT), 15 Scope Boundary entries, 13 Previous Story Intelligence items (1.1-1.5 이관), 10 Architecture Pattern constraints, 7 Threat Model scenarios, 6 commit strategy commits, 5 Tasks + 1 hand-off Task (총 30+ subtasks), 5 ACs with detailed Given/When/Then. Runtime dependency additions: `holidays>=0.50,<1.0`. No new dev-only deps. | Amelia via create-story skill |
 | 2026-04-23 | 0.2.0 | Tasks 1-5 구현 완료 (review-ready). 24 신규 파일 + 6 modified. 294 pytest passed + 14 skipped (9 WSL2-only + 5 pre-existing). 10 pre-commit hooks Passed. 5 lint-imports KEPT. mypy strict clean. wheel build 성공. Key pattern decisions: (a) `PurePosixPath` 전환 (chattr 타겟 POSIX semantic + Windows dev host 호환), (b) `holidays.country_holidays("KR", ...)` typed factory (vs 동적 `holidays.KR`), (c) `emit_readonly_mount_metric.py` pessimistic PARTIAL on non-success exit (Story 1.9 early alerting), (d) Systemd unit 2 pair (lock/unlock 각 service + timer = 4 units) + 1 scaffold (`inotify-watcher.service`, `[Install]` 생략). Commit subtasks (1.11/2.9/3.5/4.5/5.10) + Task 6 (PR) 는 **WSL2 세션 위임** (feedback_windows_host_commit_boundary.md 준수). deferred-work 14 항목 (scope 기대치 ≥ 6 초과 달성). | Amelia via bmad-dev-story |
+| 2026-04-23 | 0.3.0 | Task 6 완료 — PR #13 merged (d7833c5). WSL 위임 7 signed commits: 초기 4 (feat(alpha-defense) 1a87185 + feat(infra) e61831f + test(alpha-defense) 90bf6c6 + chore(story-1.6) 9ee285d) + CI 재실행 fix 3 (fix(ci) 7e168ec systemd-analyze tolerance + install.sh DRY_RUN visudo skip + fix(infra) c7ec7c4 inotify Documentation= URL format + fix(alpha-defense) 2d62a94 Gemini 3 findings patch). Gemini bot 3 findings 전원 inline patch (1 HIGH emit_readonly_mount_metric 의 SuccessExitStatus=0 1 로직 오류 — actual status() 조회로 수정 / 2 MEDIUM — metrics.py IndexError 가드 + readonly_mount.py try-except 확장), Story 1.5 deferred-only 패턴 탈피. CI 7-stage all PASS. 3 review threads GraphQL `resolveReviewThread` 해결 → mergeStateStatus CLEAN → `gh pr merge --squash --delete-branch`. 본 버전은 post-merge transition commit (sprint-status + Status → done). | Amelia via bmad-dev-story |
 
