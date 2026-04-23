@@ -2,12 +2,15 @@
 name = "athena-execution"
 version = "0.1.0"
 requires-python = ">=3.13,<3.14"
-description = "Athena execution — broker adapter, OrderIntent consumer. Depends on core + feature_store + alpha + ops (NOT orchestrator: DTO interface only)."
+description = "Athena execution — broker adapter, OrderIntent consumer, pre-trade ledger. Depends on core + feature_store (NOT orchestrator: DTO interface only)."
 dependencies = [
     "athena-core",
     "athena-feature-store",
     "athena-alpha-defense",
     "athena-ops-defense",
+    "boto3>=1.34",
+    "duckdb>=1",
+    "pyarrow>=17",
     "python-kis>=2",
 ]
 
@@ -18,3 +21,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["athena"]
 only-include = ["athena/execution"]
+
+# ledger/schema.sql is load-bearing runtime data: athena.execution.ledger.schema
+# reads it via `Path(__file__).parent / "schema.sql"`. Hatchling's default wheel
+# inclusion drops non-.py files under a package — force-include the DDL text.
+[tool.hatch.build.targets.wheel.force-include]
+"athena/execution/ledger/schema.sql" = "athena/execution/ledger/schema.sql"

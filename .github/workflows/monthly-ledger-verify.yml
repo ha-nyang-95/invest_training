@@ -1,0 +1,34 @@
+name: Monthly Ledger Verify
+
+# Story 1.5 AC-6 placeholder — Story 1.10 tunes the cron + wires the real
+# LEDGER_DB_PATH to the Trading PC filesystem. Runs on self-hosted runner so
+# no ledger content leaves the Trading PC.
+on:
+  schedule:
+    # 매월 1일 20:00 UTC = 매월 2일 05:00 KST (03:00 KST 는 self-hosted runner
+    # idle 시간대이므로 가용성 우선 05:00 KST 지연 허용).
+    - cron: '0 20 1 * *'
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - run: uv sync --frozen --group dev
+      - name: Verify pre_trade_ledger chain
+        env:
+          LEDGER_PROVISIONED: ${{ vars.LEDGER_PROVISIONED || '0' }}
+        run: |
+          DB_PATH="${LEDGER_DB_PATH:-$HOME/.local/share/athena/decisions.duckdb}"
+          if [[ ! -f "$DB_PATH" ]]; then
+            if [[ "$LEDGER_PROVISIONED" == "1" ]]; then
+              echo "ERROR: LEDGER_PROVISIONED=1 but $DB_PATH is missing — provisioned ledger DB disappeared." >&2
+              exit 1
+            fi
+            echo "NOTE: $DB_PATH not found + LEDGER_PROVISIONED unset — pre-provision phase, skipping verify."
+            exit 0
+          fi
+          uv run python scripts/verify_ledger.py --db "$DB_PATH"

@@ -1,26 +1,35 @@
 """Story 1.4 AC-4 Task 4.3 — Trading PC write-scope architectural invariant.
 
-Defends the D1 / #PT-2 contract: Trading PC writes ONLY to the five
-decisions.duckdb tables (modules_output, decisions, orders, anti_ego_events,
-labels_f1). Direct `INSERT INTO ticks|quotes|news` from Trading PC code is
-architecturally forbidden — those tables are Logger PC's exclusive writer
-zone, surfaced to Trading PC read-only via Parquet external scan.
+Defends the D1 / #PT-2 contract: Trading PC writes to the six decisions.duckdb
+tables (modules_output, decisions, orders, anti_ego_events, labels_f1 via
+FeatureStore; pre_trade_ledger via LedgerClient.append). Direct `INSERT INTO
+ticks|quotes|news` from Trading PC code is architecturally forbidden — those
+tables are Logger PC's exclusive writer zone, surfaced to Trading PC read-only
+via Parquet external scan.
 
-Two gates:
-1. `FeatureStore` exposes exactly 5 `insert_*` methods. Adding or removing
-   one fails loudly so future stories cannot accidentally widen the
-   write scope.
-2. String literals (including f-string static parts) in feature_query.py and
-   parquet_reader.py contain no `INSERT INTO {ticks,quotes,news}` SQL. The
-   check walks the AST to skip module/function/class docstrings and comments,
-   and whitespace-tolerates bypasses like `INSERT  INTO  "ticks"` (extra
-   spaces, quoted identifiers). parquet_reader.py additionally forbids any
-   INSERT/UPDATE/DELETE verb in any literal — it is a pure read path.
+Story 1.5 extension — §Invariant #2: `pre_trade_ledger_raw` is the 6th
+table, and its sole Python writer is `athena.execution.ledger.client.LedgerClient
+.append`. Any `INSERT INTO pre_trade_ledger_raw` string literal that appears
+OUTSIDE `packages/athena-execution/athena/execution/ledger/client.py` is
+a scope-widening bug. DuckDB 1.x has no row-level trigger (§Invariant #11),
+so this AST check + LedgerClient single entry-point are the defense layers.
 
-This is stage-2 regression (no marker — runs in every pytest invocation).
-Story 1.9 will promote this to a ruff custom rule (see deferred-work.md
-"Trading PC write-scope ruff custom rule"); the AST form here is the
-MVP defender.
+Gates:
+1. `FeatureStore` exposes exactly 5 `insert_*` methods (the ledger is NOT on
+   FeatureStore — it lives on a dedicated client). Adding / removing one
+   fails loudly so future stories cannot accidentally widen the write scope.
+2. `LedgerClient` exposes exactly one `append` method (single entry-point for
+   the ledger; Story 6.1 extends the Literal set but keeps the method signature).
+3. String literals in feature_query.py / parquet_reader.py contain no
+   `INSERT INTO {ticks,quotes,news}` SQL.
+4. String literals `INSERT INTO pre_trade_ledger_raw` or
+   `UPDATE pre_trade_ledger` / `DELETE FROM pre_trade_ledger` appear nowhere
+   in the repo EXCEPT the LedgerClient module itself.
+5. parquet_reader.py additionally forbids any INSERT/UPDATE/DELETE verb in
+   any literal — it is a pure read path.
+
+Stage-2 regression (no marker). Story 1.9 will promote this to a ruff custom
+rule; the AST form here is the MVP defender.
 """
 
 from __future__ import annotations
@@ -30,9 +39,16 @@ import inspect
 import re
 from pathlib import Path
 
+from athena.execution.ledger import client as ledger_client_module
+from athena.execution.ledger.client import LedgerClient
 from athena.feature_store import feature_query, parquet_reader
 from athena.feature_store.feature_query import FeatureStore
 
+# FeatureStore keeps 5 insert methods — ledger append lives on LedgerClient,
+# NOT on FeatureStore (Story 1.5 §Invariant #2). Pushing ledger into
+# FeatureStore would blur the write-path audit trail; the two are kept
+# separate so Story 1.9 's ruff rule can target `INSERT INTO
+# pre_trade_ledger_raw` in any non-LedgerClient file.
 EXPECTED_INSERT_METHODS = frozenset(
     {
         "insert_module_output",
@@ -42,6 +58,14 @@ EXPECTED_INSERT_METHODS = frozenset(
         "insert_label_f1",
     }
 )
+
+# Story 1.5 §Invariant #2 — LedgerClient has ONE write method.
+EXPECTED_LEDGER_METHODS = frozenset({"append"})
+
+# Relative path of the LedgerClient module (POSIX form) — the only file
+# permitted to contain `INSERT INTO pre_trade_ledger_raw` string literals.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_LEDGER_CLIENT_REL = Path("packages/athena-execution/athena/execution/ledger/client.py").as_posix()
 
 # `\s+` tolerates any whitespace (tabs, multi-spaces, newlines) between the
 # tokens — a previous regex required single-space and was silently bypassable
@@ -53,6 +77,16 @@ _LOGGER_INSERT_PATTERN = re.compile(
 )
 _ANY_WRITE_PATTERN = re.compile(
     r"\b(INSERT|UPDATE|DELETE)\s+(INTO|FROM|SET)\b",
+    re.IGNORECASE,
+)
+
+# Story 1.5 §Invariant #2 — mutations against the ledger. `_raw` suffix covers
+# the physical table; `pre_trade_ledger` (view) writes are also caught
+# because UPDATE/DELETE on a view ultimately resolves to the raw table, and
+# DuckDB actually raises a catalog error against views but we still forbid
+# the literal to prevent confusing code from shipping.
+_LEDGER_WRITE_PATTERN = re.compile(
+    r"""\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+["'`]?pre_trade_ledger(_raw)?["'`]?\b""",
     re.IGNORECASE,
 )
 
@@ -171,6 +205,74 @@ def test_detector_catches_f_string_assembly() -> None:
     # And the partial-prefix case (`INSERT INTO ` alone) legitimately does
     # NOT fire — that is per-design, otherwise we get false positives.
     assert not any(_LOGGER_INSERT_PATTERN.search(lit) for lit in literals)
+
+
+def test_ledger_client_has_exactly_one_append_method() -> None:
+    """Story 1.5 §Invariant #2 — LedgerClient's public write surface is the
+    single `append` method. Adding a sibling writer (update/delete/patch)
+    fails this assertion — scope-widening the ledger requires a new Story."""
+    actual = {
+        name
+        for name, _ in inspect.getmembers(LedgerClient, predicate=inspect.isfunction)
+        if not name.startswith("_")
+    }
+    missing = EXPECTED_LEDGER_METHODS - actual
+    extra = actual - EXPECTED_LEDGER_METHODS
+    assert not missing, f"LedgerClient lost its `append` method: {missing}"
+    assert not extra, (
+        f"LedgerClient gained a new public write method (scope creep): {extra}. "
+        "pre_trade_ledger is append-only per NFR-S3. Update Story 1.5 §Invariant #2 "
+        "before extending the write surface."
+    )
+
+
+def test_ledger_writes_only_appear_in_ledger_client() -> None:
+    """No file outside the LedgerClient module may contain an
+    `INSERT INTO pre_trade_ledger_raw` / `UPDATE pre_trade_ledger*` /
+    `DELETE FROM pre_trade_ledger*` literal. Tests are allowed an exemption
+    (they exercise DB-level failure modes explicitly, e.g. AC-6 tampered
+    payload scenario). The allowlist is narrow on purpose — any non-test,
+    non-LedgerClient hit is a bug."""
+    py_files = [
+        p
+        for p in _REPO_ROOT.rglob("*.py")
+        if ".venv" not in p.parts
+        and "_bmad" not in p.parts
+        and "_bmad-output" not in p.parts
+        and "build" not in p.parts
+        and "dist" not in p.parts
+    ]
+    offenders: list[str] = []
+    for path in py_files:
+        rel = path.relative_to(_REPO_ROOT).as_posix()
+        if rel == _LEDGER_CLIENT_REL:
+            continue
+        # Tests are allowed — they exercise the forbidden path to prove
+        # defense layers fire (AC-6 verify_chain tampered-payload scenario).
+        if "/tests/" in "/" + rel or rel.startswith("tests/"):
+            continue
+        try:
+            literals = _collect_code_string_literals(_source(str(path)))
+        except SyntaxError:
+            continue
+        hits = [lit for lit in literals if _LEDGER_WRITE_PATTERN.search(lit)]
+        if hits:
+            offenders.append(f"{rel}: {hits!r}")
+    assert not offenders, "Only LedgerClient may write pre_trade_ledger. Offenders:\n" + "\n".join(
+        offenders
+    )
+
+
+def test_ledger_client_module_contains_insert_into_raw() -> None:
+    """Positive control — if the file stops containing `INSERT INTO
+    pre_trade_ledger_raw`, the negative scan above becomes vacuous. Detect
+    that regression by requiring the literal to be present in exactly the
+    LedgerClient module."""
+    literals = _collect_code_string_literals(_source(ledger_client_module.__file__))
+    assert any(_LEDGER_WRITE_PATTERN.search(lit) for lit in literals), (
+        "LedgerClient no longer contains an INSERT INTO pre_trade_ledger_raw "
+        "literal — the pattern-based regression test above is now vacuous."
+    )
 
 
 def test_detector_skips_docstring_mentioning_pattern() -> None:

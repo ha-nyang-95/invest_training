@@ -1,5 +1,5 @@
 # generated: 2026-04-21
-# last_updated: 2026-04-22  # Story 1.4 review-flip → done (40 findings triaged: 36 patch across Phase A/B/C signed commits 52ab90d + 9162f07 + 7e50557, 2 deferred to Story 1.7, 3 deferred to downstream, 4 dismissed; 204p/4s, spec body reconciled, all [x] items closed)
+# last_updated: 2026-04-23  # Story 1.5 review-apply: 3-layer adversarial code review (bmad-code-review), D1 옵션 C resolved, 17 patch applied (1 CRITICAL / 4 MAJOR / 5 MINOR / 7 NIT), 5 defer synced; post-patch 260p/11s, 5-gate green; status: review (유지)
 # project: invest_training
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,8 +35,8 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-21
-last_updated: 2026-04-22
-# review-flip (Story 1.4): 3-layer code review → done. Story 1.5 ready-for-dev next.
+last_updated: 2026-04-23
+# Story 1.5 (Pre-Trade Ledger SHA-256 chain substrate): review (post-apply). 7 Tasks + 17 review patches applied, 260 passed / 5 skipped (11s), 5-gate green. Review findings: 1 decision resolved (옵션 C), 17 patch applied, 5 defer synced, 11 dismiss. Real LUKS/S3 + monthly continuity wiring deferred to Story 1.10. All commits WSL2-delegated.
 project: invest_training
 project_key: NOKEY
 tracking_system: file-system
@@ -49,7 +49,7 @@ development_status:
   1-2-환경-secrets-infrastructure-wsl2-os-keychain-ssh-signing: done
   1-3-self-hosted-ci-cd-pipeline-7단계-gate: done
   1-4-duckdb-parquet-shard-rsync-data-pipeline: done
-  1-5-pre-trade-ledger-초기-세그먼트-sha-256-체인: backlog
+  1-5-pre-trade-ledger-초기-세그먼트-sha-256-체인: review
   1-6-f5-읽기전용-마운트-systemd-timer-infrastructure: backlog
   1-7-l2-호가창-websocket-로거-24-7-fr1: backlog
   1-8-dart-뉴스-피드-실시간-크롤러-fr2: backlog

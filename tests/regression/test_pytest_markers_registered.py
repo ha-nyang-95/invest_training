@@ -11,7 +11,8 @@ import tomllib
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EXPECTED_MARKERS = {"integration", "snapshot", "walk_forward"}
+# Story 1.5 Task 2.5 added `slow` for the mypy-subprocess Literal regression.
+EXPECTED_MARKERS = {"integration", "snapshot", "walk_forward", "slow"}
 
 
 def _registered_marker_names() -> set[str]:
