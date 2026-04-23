@@ -37,6 +37,8 @@ repos:
           - keyring>=25
           - polars>=1
           - duckdb>=1
+          # Story 1.6 — `holidays` provides its own type hints since 0.50.
+          - holidays>=0.50,<1.0
 
   # AR-SEC1 + NFR-S1: never commit secrets/keys. detect-private-key catches PEM
   # headers only; gitleaks scans for API tokens / high-entropy strings / broker

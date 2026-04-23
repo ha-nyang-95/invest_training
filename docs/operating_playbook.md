@@ -787,3 +787,89 @@ consume 한다.
   3. `open_decisions_duckdb` 재시도, 실패 시 systemd 서비스 재기동.
   4. 직후 `--prev-segment-json` 없이 full chain verify 재실행.
   5. 계속 실패 시 Story 5.6 Global CB 발동 → Paper-only 자동 전환.
+
+## Story 1.6 — F5 읽기전용 마운트 systemd Timer
+
+### Host setup prerequisite — sudoers NOPASSWD for chattr
+
+`sudo chattr +i` 를 non-interactive 하게 실행하려면 `/etc/sudoers.d/athena-readonly-mount`
+drop-in 이 필요하다. `install.sh` 가 자동 설치하지만, 일반 원리:
+
+1. sudoers drop-in 원본은 repo 내 `infra/systemd/sudoers.d/athena-readonly-mount`.
+   → 4 line, 파일 2개 × `+i`/`-i` 2 동작 = 4 entry. wildcard 금지 (Invariant #7).
+2. **`visudo -cf <file>` 선행 검증 필수.** 잘못된 sudoers 구문은
+   `/etc/sudoers` 전체를 망가뜨려 sudo 자체가 동작하지 않는다. `install.sh`
+   가 이 검증을 자동 수행하지만, 수동 수정 시에는 반드시 직접 실행.
+3. 설치 위치 / permission: `/etc/sudoers.d/athena-readonly-mount`, 모드 0440,
+   소유자 root:root. drop-in 디렉토리 관례.
+
+### Install 4 systemd units + enable timers
+
+```bash
+cd ~/invest_training
+# 1) Dry-run 먼저 실행 — 계획된 작업 점검
+DRY_RUN=1 sudo bash infra/systemd/athena-readonly-mount.install.sh
+# 2) 실설치
+sudo bash infra/systemd/athena-readonly-mount.install.sh
+# 3) Timer 활성 확인
+systemctl list-timers --all | grep readonly-mount
+systemctl status athena-readonly-mount-lock.timer --no-pager
+systemctl status athena-readonly-mount-unlock.timer --no-pager
+```
+
+기대 출력: `lock.timer` 다음 발동 = 다음 평일 09:00 KST,
+`unlock.timer` 다음 발동 = 다음 평일 15:30 KST.
+
+### Manual lock/unlock during ops
+
+**점검·긴급 unlock 이 필요한 경우**:
+
+```bash
+# 긴급 정책 수정을 위해 장중 강제 unlock (드문 상황)
+sudo systemctl start athena-readonly-mount-unlock.service
+uv run python -m athena.alpha_defense.f5 status  # UNLOCKED 확인
+# 정책 파일 수정 후 즉시 재잠금
+sudo systemctl start athena-readonly-mount-lock.service
+# 감사 추적 확인
+journalctl -u athena-readonly-mount-unlock.service -n 5 --no-pager
+```
+
+모든 수동 전환은 systemd journal 에 기록 → Epic 3 Story 3.1 이 후속
+`anti_ego_events` 체인으로 승격 가능 (현 V1.0 은 journal 만).
+
+### KR holiday list maintenance
+
+- `holidays` PyPI 라이브러리 가 KRX 공휴일 + 대체공휴일 자동 추적.
+  연 1~2회 `uv sync` 재실행으로 최신 dataset 반영
+  (`pyproject.toml` 의 `holidays>=0.50,<1.0` bound 내 upgrade).
+- KRX **임시 휴장** (자연재해·국가 애도 등 단기 예외) 는 `holidays`
+  라이브러리가 반영하지 않는다. 공시 확인 후 수동 보강:
+  ```bash
+  sudo mkdir -p /etc/athena
+  echo "2026-MM-DD" | sudo tee -a /etc/athena/extra_closed_days.txt
+  ```
+  파일 포맷: ISO-8601 날짜 한 줄당 하나, `#` 주석 허용.
+- KRX 공식 임시 휴장 조회: https://open.krx.co.kr/contents/OPN/04/04020100/OPN04020100.jsp
+
+### Troubleshooting: `MountState.PARTIAL`
+
+`athena_readonly_mount_state{state="PARTIAL"} 1` 메트릭이 떠 있거나
+Alertmanager (Story 1.9) 에서 알림 수신 시:
+
+1. Per-file 상태 확인:
+   ```bash
+   uv run python -m athena.alpha_defense.f5 status
+   lsattr -d /var/lib/athena/policy/policy.toml /var/lib/athena/policy/flag_registry.toml
+   ```
+2. 수동 재시도:
+   ```bash
+   sudo systemctl start athena-readonly-mount-lock.service
+   ```
+   `ReadonlyMountController.lock()` 은 idempotent 이므로 이미 immutable
+   인 파일은 skip, UNLOCKED 인 파일만 재시도.
+3. 계속 PARTIAL 이면:
+   - sudoers 권한 확인: `sudo -n /usr/sbin/chattr -V` exit 0 이어야 함.
+   - ext4 filesystem 확인: `df -T /var/lib/athena/policy` 출력 `ext4`.
+     `/mnt/c` (9p DrvFs) 는 chattr 불가 (Story 1.6 Invariant #2).
+   - 파일 존재 확인: 없으면 install.sh 재실행으로 seed.
+4. 근본 원인 불명 시 `deferred-work.md ## Deferred from: Story 1.6` 참조.

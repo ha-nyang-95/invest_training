@@ -1,0 +1,42 @@
+[Unit]
+# Athena F5 readonly-mount LOCK — Story 1.6 AC-2.
+# Runs at 09:00 KST every weekday (Mon-Fri) per the paired .timer.
+# `chattr +i` on /var/lib/athena/policy/{policy,flag_registry}.toml so
+# nothing — including root, git revert, or sed-in-place — can mutate the
+# active policy during market hours. NFR-S4 / FR16 / AR-SEC3.
+Description=Athena F5 — Lock policy directory (chattr +i) at KRX open
+# chattr is a filesystem operation; no network dependency required.
+# local-fs.target ensures /var is mounted before we try to chattr files in it.
+After=local-fs.target
+# If protected files are missing the install is incomplete — fail loud rather
+# than silently no-op. install.sh (Task 2.5) materialises both files first.
+ConditionPathExists=/var/lib/athena/policy/policy.toml
+ConditionPathExists=/var/lib/athena/policy/flag_registry.toml
+
+[Service]
+Type=oneshot
+User=khuk0
+Group=khuk0
+# Skip on KRX non-trading days (weekends + KR public holidays + extra-closed).
+# exit 1 from this script is treated as service failure by systemd, but we
+# WANT a "skip" to look like a clean no-op in the journal — see SuccessExitStatus
+# below which whitelists exit 1 from check_trading_day so it doesn't trip
+# Restart= or alert rules.
+ExecStartPre=/home/khuk0/invest_training/.venv/bin/python /home/khuk0/invest_training/scripts/check_trading_day.py
+# Real chattr +i — Python wrapper (single entrypoint per Story 1.6 Invariant #3).
+ExecStart=/home/khuk0/invest_training/.venv/bin/python -m athena.alpha_defense.f5 lock
+# Emit Prometheus textfile metric AFTER the transition (success or failure).
+# $EXIT_STATUS is populated only in ExecStopPost (per systemd.service(5)).
+ExecStopPost=/home/khuk0/invest_training/.venv/bin/python /home/khuk0/invest_training/scripts/emit_readonly_mount_metric.py --action lock --exit-code $EXIT_STATUS --output /var/lib/node_exporter/textfile_collector/athena_readonly_mount.prom
+StandardOutput=append:/var/log/athena/readonly-mount.log
+StandardError=append:/var/log/athena/readonly-mount.log
+# Retry once on partial failure (e.g. one file briefly busy). lock() is
+# idempotent so a second run reconciles already-locked + retried-failed paths.
+Restart=on-failure
+RestartSec=30s
+# Treat ExecStartPre's "skip — non-trading day" exit 1 as success so systemd
+# does not flag the unit failed and the metric emitter still records the no-op.
+SuccessExitStatus=0 1
+
+[Install]
+WantedBy=multi-user.target

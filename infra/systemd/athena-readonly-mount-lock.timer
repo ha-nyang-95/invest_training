@@ -1,0 +1,23 @@
+[Unit]
+# Athena F5 readonly-mount LOCK timer — Story 1.6 AC-2.
+# Fires the paired .service at 09:00 KST on KRX trading weekdays.
+Description=Athena F5 — Lock policy at 09:00 KST (M-F, holidays handled by service)
+Requires=athena-readonly-mount-lock.service
+
+[Timer]
+# OnCalendar is evaluated against the system timezone — WSL2 must be set to
+# Asia/Seoul (install.sh checks). KRX 휴장 logic lives in the service's
+# ExecStartPre=check_trading_day.py rather than OnCalendar so we can also
+# exclude KR public holidays + ad-hoc closed days from a single source.
+OnCalendar=Mon..Fri 09:00
+# Persistent=false — if the host is off at 09:00 we do NOT auto-fire on next
+# boot. Rationale (Story 1.6 Invariant #6): an operator may have unlocked
+# manually for emergency fix; auto-relock-on-late-boot would surprise them.
+# Operator can always `sudo systemctl start athena-readonly-mount-lock.service`
+# explicitly.
+Persistent=false
+# 1-minute jitter window keeps the metric scrape free of millisecond noise.
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
