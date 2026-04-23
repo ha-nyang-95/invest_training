@@ -19,7 +19,12 @@ OWNER="${OWNER:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --owner=*) OWNER="${1#*=}"; shift ;;
-    --owner)   OWNER="$2"; shift 2 ;;
+    --owner)
+      if [[ $# -lt 2 ]]; then
+        echo "--owner requires a value" >&2; exit 2
+      fi
+      OWNER="$2"; shift 2
+      ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -69,6 +74,12 @@ mkdir -p infra/github
 # Use python3 stdlib (jq is not in Ubuntu 24.04 default apt) and strip every
 # `url` / `*_url` key so the baseline is portable across forks and repo renames
 # — drift detection compares policy semantics, not endpoint paths.
+#
+# Write to a temp file first so a mid-stream `gh api` failure cannot truncate
+# the existing baseline to an empty / partial JSON (which would false-negative
+# future drift detection, Story 1.9 / 8.6).
+TMP_BASELINE="$(mktemp)"
+trap 'rm -f "$TMP_BASELINE"' EXIT
 gh api \
   -H "Accept: application/vnd.github+json" \
   "repos/${OWNER}/${REPO}/branches/master/protection" \
@@ -85,5 +96,6 @@ def strip_urls(o):
 
 json.dump(strip_urls(json.load(sys.stdin)), sys.stdout, indent=2, sort_keys=True)
 sys.stdout.write("\n")
-' > infra/github/branch_protection.json
+' > "$TMP_BASELINE"
+mv "$TMP_BASELINE" infra/github/branch_protection.json
 echo "done." >&2

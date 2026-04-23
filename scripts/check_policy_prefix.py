@@ -43,9 +43,15 @@ def main() -> int:
     msg_path = Path(sys.argv[1])
     first_line = ""
     if msg_path.exists():
-        raw = msg_path.read_text(encoding="utf-8").splitlines()
-        if raw:
-            first_line = raw[0]
+        # `utf-8-sig` transparently strips a UTF-8 BOM that Windows git
+        # occasionally prepends to COMMIT_EDITMSG; matches git's own
+        # post-cleanup view of the subject by skipping leading blank lines.
+        raw = msg_path.read_text(encoding="utf-8-sig").splitlines()
+        for line in raw:
+            stripped = line.strip()
+            if stripped:
+                first_line = stripped
+                break
     changed = staged_files()
     policy_touched = [f for f in changed if POLICY_FILES.match(f)]
     if not policy_touched:

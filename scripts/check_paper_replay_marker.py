@@ -30,13 +30,16 @@ def _run_git(*args: str) -> str:
 
 
 def head_subject() -> str:
-    return _run_git("log", "-1", "--pretty=%s", "HEAD")
+    try:
+        return _run_git("log", "-1", "--pretty=%s", "HEAD")
+    except subprocess.CalledProcessError:
+        return ""
 
 
 def main() -> int:
     if not POLICY_PREFIX.search(head_subject()):
         return 0
-    short = _run_git("rev-parse", "--short", "HEAD")
+    short = _run_git("rev-parse", "--short=7", "HEAD")
     tag = f"paper-replay-ok/{short}"
     tags = _run_git("tag", "--list", tag).splitlines()
     if tag in tags:

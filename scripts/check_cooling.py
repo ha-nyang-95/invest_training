@@ -38,11 +38,14 @@ def _run_git(*args: str) -> str:
 
 
 def head_subject() -> str:
-    return _run_git("log", "-1", "--pretty=%s", "HEAD")
+    try:
+        return _run_git("log", "-1", "--pretty=%s", "HEAD")
+    except subprocess.CalledProcessError:
+        return ""
 
 
-def prev_policy_commit_ts() -> datetime | None:
-    """Return the most recent `policy:` commit timestamp excluding HEAD.
+def prev_policy_commit() -> tuple[str, datetime] | None:
+    """Return (sha, timestamp) of the most recent `policy:` commit excluding HEAD.
 
     Returns None when the repo has no prior `policy:` commit (genesis case)
     or only one commit in total.
@@ -60,23 +63,25 @@ def prev_policy_commit_ts() -> datetime | None:
     if not out:
         return None
     first_line = out.splitlines()[0]
-    _, ts = first_line.split("\t")
-    return datetime.fromtimestamp(int(ts), tz=UTC)
+    sha, ts = first_line.split("\t")
+    return sha, datetime.fromtimestamp(int(ts), tz=UTC)
 
 
 def main() -> int:
     subject = head_subject()
     if not POLICY_PREFIX.search(subject):
         return 0
-    prev_ts = prev_policy_commit_ts()
-    if prev_ts is None:
+    prev = prev_policy_commit()
+    if prev is None:
         return 0
+    prev_sha, prev_ts = prev
     elapsed = _now_utc() - prev_ts
     if elapsed >= COOLING_WINDOW:
         return 0
     remaining = (COOLING_WINDOW - elapsed).total_seconds() / 3600
     payload = {
         "error_code": "POLICY_NOT_COOLED",
+        "prev_policy_sha": prev_sha[:7],
         "prev_policy_ts_utc": prev_ts.isoformat(),
         "cooling_remaining_hours": round(remaining, 2),
     }

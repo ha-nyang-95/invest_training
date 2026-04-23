@@ -1,6 +1,6 @@
 # Story 1.3: Self-Hosted CI/CD Pipeline — 7단계 Gate
 
-Status: in-progress (Tasks 2-6 landed; Task 1 runner registration + Task 5 apply/verify still require Khuk0 admin action before sprint-status can flip to review)
+Status: done (code review 2026-04-22 — 13 patches applied, 1 deferred to Epic 6 Story 6.2; `uv run pytest -n auto` 127 passed / 3 skipped (intentional placeholders) on WSL2 Ubuntu 24.04 CPython 3.13.13)
 
 Epic: 1 — Foundation & Market Truth Capture
 Story Key: `1-3-self-hosted-ci-cd-pipeline-7단계-gate`
@@ -44,7 +44,7 @@ so that **어떤 코드·정책 변경도 pre-commit → unit → integration(mo
 **And** 모든 job `timeout-minutes: 20` 명시 (stage-1,2,3,6,7) · `timeout-minutes: 45` (stage-4,5) — 런너 hang 방지
 **And** 모든 job `permissions: contents: read` 최소 권한 선언 (stage-7 만 `contents: read + actions: read` — tag 조회용)
 **And** `concurrency: { group: ci-${{ github.ref }}, cancel-in-progress: true }` 설정 — rapid repush 시 중간 실행 취소
-**And** merge gate 는 GitHub branch protection rule (Task 6) 의 "Require status checks to pass" 로 **7개 job 전부** 명시 — `ci-7-stage / stage-1-pre-commit` ~ `/stage-7-paper-replay-marker`
+**And** merge gate 는 GitHub branch protection rule (Task 6) 의 "Require status checks to pass" 로 **7개 job 전부** 명시 — `ci-7-stage / stage-1-pre-commit` ~ `/stage-7-paper-replay-marker` [Impl. correction 2026-04-22 — Change Log v1.0.0 item (a): GitHub 이 실제 기록하는 check-run 이름은 workflow-name 접두사 없이 job ID 단독 (`stage-1-pre-commit` … `stage-7-paper-replay-marker`). `infra/github/branch_protection.json` 과 `scripts/setup_branch_protection.sh` 는 short-form 사용.]
 **And** 구 `scaffold-gate.yml` 파일은 **삭제** (rename 커밋에 포함) — `workflow_run` 이름 충돌 방지, GitHub Actions 이전 런 history 는 자동 archive 됨
 
 **AC-3: `pytest.mark` registration + placeholder 테스트 파일 (markers: `integration` · `snapshot` · `walk_forward`)** [Source: architecture.md#AR-TEST1-3, epics.md#Story-1.3 AC-2 단계 4-5]
@@ -108,13 +108,14 @@ markers = [
   - ✅ Require a pull request before merging · Require approvals = **0** (솔로 개발자, 본인 self-review) · Dismiss stale PR approvals = OFF
   - ✅ Require status checks to pass before merging · Require branches to be up to date = ON
     - Required checks (정확 7개 + scaffold-gate 대체되었으므로 삭제):
-      - `ci-7-stage / stage-1-pre-commit`
-      - `ci-7-stage / stage-2-pytest-unit`
-      - `ci-7-stage / stage-3-pytest-integration`
-      - `ci-7-stage / stage-4-snapshot-regression`
-      - `ci-7-stage / stage-5-walk-forward-smoke`
-      - `ci-7-stage / stage-6-cooling-gate`
-      - `ci-7-stage / stage-7-paper-replay-marker`
+      - `stage-1-pre-commit`
+      - `stage-2-pytest-unit`
+      - `stage-3-pytest-integration`
+      - `stage-4-snapshot-regression`
+      - `stage-5-walk-forward-smoke`
+      - `stage-6-cooling-gate`
+      - `stage-7-paper-replay-marker`
+    - [Impl. correction 2026-04-22 — Change Log v1.0.0 item (a): context 이름은 workflow-name 접두사 없는 short-form (job ID 단독). 이는 GitHub 이 실제 기록하는 check-run 이름과 일치시키기 위한 정정.]
   - ✅ Require signed commits (NFR-A5 · Story 1.2 AC-4 의 CI enforce)
   - ✅ Require linear history (rebase/squash only — policy 커밋 SHA 추적 단순화)
   - ✅ Require conversation resolution before merging
@@ -506,7 +507,39 @@ Execute **in order**. Mark `[x]` only when both implementation AND tests pass. R
 
 ### Review Findings
 
-(This section is populated by the `bmad-code-review` workflow after `dev-story` completes. Left empty by design at story creation time — don't remove the heading.)
+Code review run 2026-04-22 (Blind Hunter + Edge Case Hunter + Acceptance Auditor, 3 layers, zero failed layers). Diff range `a93e728..HEAD` — 22 files, +1933/-42. 13 patches applied, 1 defer. Full test suite 127 passed / 3 skipped (intentional placeholders).
+
+**Patch (13 — all applied 2026-04-22):**
+
+- [x] [Review][Patch] `POLICY_NOT_COOLED` payload missing `prev_policy_sha` — spec line 81 exemplar includes the field; impl discarded SHA after `first_line.split("\t")`. Fixed: `prev_policy_commit()` now returns `(sha, ts)` and payload includes `prev_policy_sha[:7]`; test asserts presence + length [`scripts/check_cooling.py:44-84` + `tests/integration/test_policy_cooling_gate.py:86-93`]
+- [x] [Review][Patch] `head_subject()` crashed with uncaught `CalledProcessError` on empty repo / missing git. Fixed: wrap in `try/except CalledProcessError`, return empty string (falls through to non-policy exit 0); `FileNotFoundError` (git binary missing) intentionally still propagates as a loud runner-config failure [`scripts/check_cooling.py:40-44`, `scripts/check_paper_replay_marker.py:32-36`]
+- [x] [Review][Patch] `setup_branch_protection.sh` non-atomic baseline write — `gh api ... > infra/github/branch_protection.json` truncated target before `gh` ran. Fixed: write to `mktemp` then `mv`, with `trap 'rm -f "$TMP_BASELINE"' EXIT` cleanup [`scripts/setup_branch_protection.sh:76-97`]
+- [x] [Review][Patch] `check_paper_replay_marker.py` used implicit `git rev-parse --short` (respected `core.abbrev`). Fixed: pinned `--short=7` so tag lookup is length-stable across contributor gitconfigs [`scripts/check_paper_replay_marker.py:42`]
+- [x] [Review][Patch] `conftest._base_env()` keep-list dropped Windows essentials. Fixed: added `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `TMP`, `TEMP`, `TMPDIR` so git on Windows doesn't fall back to OneDrive-synced gitconfig or hang on temp writes [`tests/integration/conftest.py:110-131`]
+- [x] [Review][Patch] `test_policy_within_cooling_window_blocks` bounds too loose (`60.0 <= ... <= 62.5`). Fixed: tightened to `61.99 <= ... <= 62.01` (expected exactly 62.0h ± 1s from `%ct` integer-seconds rounding) [`tests/integration/test_policy_cooling_gate.py:87-93`]
+- [x] [Review][Patch] `check_policy_prefix.py` read COMMIT_EDITMSG with `encoding="utf-8"`. Fixed: switched to `utf-8-sig` to transparently strip UTF-8 BOM that Windows git occasionally prepends [`scripts/check_policy_prefix.py:49-50`]
+- [x] [Review][Patch] `check_policy_prefix.py` took `raw[0]` as subject → leading-blank-line templates false-blocked. Fixed: scan lines and use first non-blank line as subject (matches git's own post-cleanup view) [`scripts/check_policy_prefix.py:51-54`]
+- [x] [Review][Patch] Story Status field stale — line 3 read "in-progress (Tasks 2-6 landed; …)" but sprint-status.yaml + Change Log v1.0.0/v1.1.0 both recorded `review`. Fixed: updated to `review` with 2026-04-22 context [this file:3]
+- [x] [Review][Patch] Playbook "Self-Hosted Runner Bootstrap" commands showed user-level path but actual install is system-level per Task 1.3 Change Log. Fixed: updated commands to `sudo ./svc.sh install khuk0` + `sudo systemctl status`, kept `loginctl enable-linger` as documented no-op with rationale block [`docs/operating_playbook.md:443-459`]
+- [x] [Review][Patch] Spec AC-2 line 47 + AC-5 lines 111-117 prescribed long-form status check names `ci-7-stage / stage-X-*`. Fixed: AC-5 lines now show short-form; inline "Impl. correction 2026-04-22" notes cross-reference Change Log v1.0.0 item (a) [this file:47, 111-119]
+- [x] [Review][Patch] `setup_branch_protection.sh` `--owner` positional form died with `unbound variable` under `set -u`. Fixed: explicit `$#` length check + clean usage error [`scripts/setup_branch_protection.sh:19-28`]
+- [x] [Review][Patch] `conftest._load_script_module` leaked `sys.modules[name]` across tests. **Upgraded from defer → patch** per Khuk0's feedback memory ("진짜 환경 의존만 defer 정당"). Fixed: `load_script` fixture now captures `sys.modules[name]` before replacement and restores it on teardown via `monkeypatch.setitem` / `delitem` [`tests/integration/conftest.py:35-54`]
+
+**Defer (1 — logged to `deferred-work.md`):**
+
+- [x] [Review][Defer] `check_cooling.py` accepts negative / zero `%ct` (e.g. `GIT_COMMITTER_DATE=@0`) which makes `elapsed` huge and always passes [`scripts/check_cooling.py:66`] — deferred, threat model requires write-access spoofer; holistic commit-timestamp integrity belongs to Epic 6 Story 6.2 SHA-256 chain audit (external anchor)
+
+**Dismiss (notable ones — not persisted, captured here for audit trail):**
+
+- `%ct` (committer time) vs `%at` (author time) — rebase resets `%ct` for a cooled policy commit, but the resulting behavior is fail-closed (false-block, never false-pass) which is **consistent with Khuk0's strict-veto policy**; squash-merge (mandated merge strategy) intentionally stamps new `%ct` at merge instant; keep as-is.
+- `policy-prefix-guard` YAML shape deviation (missing `files:`, `pass_filenames`, `entry: uv run` wrap) — functionally equivalent; filtering moved into the Python script's `POLICY_FILES` regex; documented in Change Log v1.0.0.
+- `pre-commit run --all-files` × `stages: [commit-msg]` interaction — pre-commit auto-skips non-matching-stage hooks; no crash.
+- `cancel-in-progress: true` mid-stage cancellation — documented behavior, intended.
+- CI 7× `uv sync --frozen` overhead — performance, not correctness; not addressed in this story.
+- `restrictions: null` wipe risk on reusable script — Khuk0's personal repo has no org restrictions to wipe.
+- `git init -b master` (git ≥ 2.28) — runner pinned; developer WSL2 ships ≥ 2.34.
+- `app_id: 15368` future drift — stable across GitHub history.
+- `-E` flag ordering fragility in `git log --grep` — works on modern git; speculative.
 
 ## Dev Notes
 

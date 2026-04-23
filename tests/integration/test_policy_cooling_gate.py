@@ -83,7 +83,13 @@ def test_policy_within_cooling_window_blocks(
     err = capsys.readouterr().err.strip()
     payload = json.loads(err)
     assert payload["error_code"] == "POLICY_NOT_COOLED"
-    assert 60.0 <= payload["cooling_remaining_hours"] <= 62.5
+    # Expected window: 72h - 10h elapsed = exactly 62.0h (± 1s from commit
+    # timestamp rounding via `%ct` integer seconds).
+    assert 61.99 <= payload["cooling_remaining_hours"] <= 62.01
+    # Alertmanager Medium payload must include the previous policy SHA for
+    # forensic routing (spec AC-4 line 81).
+    assert "prev_policy_sha" in payload
+    assert len(payload["prev_policy_sha"]) == 7
 
 
 def test_non_policy_head_paper_replay_passes(

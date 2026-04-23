@@ -440,10 +440,15 @@ tar xzf actions-runner-linux-x64.tar.gz
   --unattended \
   --replace
 
+# System-level systemd unit (Task 1.3 Change Log — chosen over user-level for
+# boot-from-cold independence of login session). `svc.sh install` with `sudo`
+# writes the unit under `/etc/systemd/system/` and starts it as root-launched
+# service running as Khuk0. The `loginctl enable-linger` below is kept as a
+# belt-and-braces no-op for any future revert to user-scope.
 sudo loginctl enable-linger khuk0
-./svc.sh install khuk0
-./svc.sh start
-systemctl --user status 'actions.runner.*.service'
+sudo ./svc.sh install khuk0
+sudo ./svc.sh start
+sudo systemctl status 'actions.runner.*.service'
 
 chmod 600 ~/actions-runner/.runner \
           ~/actions-runner/.credentials \
@@ -455,7 +460,7 @@ Verification artefacts (to be pasted here once Khuk0 completes the bootstrap):
 
 - `gh api repos/<OWNER>/invest_training/actions/runners` JSON (name, labels,
   status=`online`).
-- `systemctl --user status actions.runner.<OWNER>-invest_training.athena-trading-pc.service`
+- `sudo systemctl status actions.runner.<OWNER>-invest_training.athena-trading-pc.service`
   showing `active (running)` after a `wsl --shutdown` reboot.
 - Confirmation that the token value has been discarded (not stored anywhere).
 
@@ -543,3 +548,116 @@ End-to-end smoke (Khuk0 captures the terminal transcript here when running):
    SSH signature.
 
 Delete the temporary `paper-replay-ok/*` tag after the smoke run completes.
+
+## Story 1.4 — DuckDB + Parquet Shard + rsync Data Pipeline
+
+### Logger PC `features_logger.duckdb` Initialisation (one-time)
+
+Run once on Logger PC after Story 1.7 brings the host online:
+
+```bash
+uv run python -c "\
+from pathlib import Path; \
+from athena.feature_store.duckdb_client import open_logger_duckdb; \
+from athena.feature_store.schemas import (\
+create_ticks_table, create_quotes_table, create_news_table); \
+conn = open_logger_duckdb(Path('data/duckdb/features_logger.duckdb')); \
+create_ticks_table(conn); create_quotes_table(conn); create_news_table(conn); \
+print('initialized')"
+```
+
+### Hourly Parquet Shard Export Schedule (Logger PC)
+
+Logger PC runs Windows 11; use NSSM-wrapped scheduled task or Task
+Scheduler. Recommended cron expression (UTC): `0 1 * * * *` (every hour at
+minute 01, gives the logger 60s slack to flush the prior hour before
+export). Command:
+
+```
+uv run python scripts/export_parquet_shard.py \
+  --duckdb data/duckdb/features_logger.duckdb \
+  --out-root data/parquet \
+  --hour now-1
+```
+
+Exit 0 is success (per-table file count emitted on stdout as JSON). Exit 1
+with stderr `error_code=SHARD_ALREADY_EXISTS` means the export was retried
+against an already-written hour (architecture invariant — don't force; use
+`--check-only` to verify data identity instead).
+
+### Trading PC `athena-logger-sync.timer` Installation
+
+Normal install (Logger PC reachable):
+
+```bash
+bash scripts/install_logger_sync_unit.sh
+```
+
+Dry run (Logger PC absent — W1 Day 1 through end of Story 1.7):
+
+```bash
+DRY_RUN=1 bash scripts/install_logger_sync_unit.sh
+```
+
+Before running the normal install, add to `~/.ssh/config`:
+
+```
+Host logger-pc
+  HostName 192.168.1.<LOGGER_IP>
+  User khuk0
+  IdentityFile ~/.ssh/id_ed25519_athena_sync
+  IdentitiesOnly yes
+  StrictHostKeyChecking accept-new
+  Compression yes
+```
+
+Generate a **separate** sync key (not the signing key — NFR-S2 mandates
+separation):
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_athena_sync -N "" \
+  -C "athena-sync@trading-pc"
+ssh-copy-id -i ~/.ssh/id_ed25519_athena_sync.pub logger-pc
+ssh logger-pc 'echo ok'  # must pass without password prompt
+```
+
+### rsync Lag Alert Diagnostic Procedure
+
+When Alertmanager pages `LoggerSyncLagHigh` (lag > 120s), the on-call runs
+these five checks in order — each is cheap and narrows the cause fast:
+
+1. **Logger PC reachability** — `ping -c 3 logger-pc` from Trading PC.
+2. **SSH path** — `ssh logger-pc 'echo ok'` — checks key + authorized_keys
+   + sshd on Logger PC.
+3. **systemd journal** —
+   `journalctl -u athena-logger-sync.service --since '5 min ago'` —
+   look for `Permission denied`, `Host key verification failed`,
+   `Connection timed out`, or non-zero rsync exit codes.
+4. **Manual dry-run rsync** —
+   `rsync -avn --timeout=10 logger-pc:/data/parquet/ /data/parquet/` —
+   confirms the pipeline works interactively even if systemd's unit
+   environment is stale.
+5. **Disk free space** — `df -h /data` — a full destination filesystem
+   produces exit 12 even when SSH is fine.
+
+### Trading PC Write-Scope Invariant
+
+Trading PC writes ONLY to these five `decisions.duckdb` tables:
+
+- `modules_output` — Story 1.5 (Pre-Trade Ledger)
+- `decisions` — Story 1.5
+- `orders` — Story 4.3
+- `anti_ego_events` — Story 3.1
+- `labels_f1` — Story 3.3
+
+`ticks` / `quotes` / `news` are Logger PC's exclusive writer zone; Trading
+PC reads them via Parquet external scan (`parquet_reader.attach_parquet_views`).
+Defenders:
+
+- `tests/regression/test_trading_pc_write_scope.py` — introspects
+  `FeatureStore` for exactly five `insert_*` methods and greps
+  `feature_query.py` for any forbidden INSERT against Logger tables.
+
+Any reviewer considering adding a sixth `insert_*` must update both the
+invariant test's expected set AND Source-of-Truth Invariant #3 in the
+story file.

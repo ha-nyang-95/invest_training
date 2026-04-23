@@ -1,0 +1,20 @@
+# Story 1.4 AC-5 — data pipeline alerts. Loaded by Prometheus in Story 1.9.
+# severity=high routes to the on-call paging channel (Alertmanager config TBD
+# in Story 1.9). Expression reads the textfile-collector gauge emitted by
+# scripts/emit_logger_sync_metric.py.
+groups:
+  - name: athena_data_pipeline
+    rules:
+      - alert: LoggerSyncLagHigh
+        # absent() branch is the silent-failure guard: if the emitter never
+        # ran post-reboot (e.g. venv path broke, metric dir unwritable, unit
+        # disabled), the series doesn't exist and a plain `time() - gauge`
+        # expression evaluates to no-data → alert NEVER fires. The `absent()`
+        # disjunct fires immediately in that case.
+        expr: absent(athena_logger_sync_last_success_seconds) or (time() - athena_logger_sync_last_success_seconds > 120)
+        for: 30s
+        labels:
+          severity: high
+        annotations:
+          summary: "Logger -> Trading rsync lag exceeded 120s (or metric series absent)"
+          description: "Last successful rsync was {{ $value }}s ago (or the metric series is missing entirely — check that athena-logger-sync.service ExecStopPost ran). Check logger-pc network + SSH key + rsync log at /var/log/athena/logger-sync.log."

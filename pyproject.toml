@@ -39,7 +39,7 @@ addopts = [
     "--dist=loadfile",
 ]
 testpaths = ["packages", "tests"]
-asyncio_mode = "auto"
+asyncio_mode = "strict"
 markers = [
     "integration: cross-package integration test (CI stage-3), mock KIS only",
     "snapshot: historical-failure S_entry regression (CI stage-4), Story 2.1 fixture required",
