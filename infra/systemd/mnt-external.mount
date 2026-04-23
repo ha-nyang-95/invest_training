@@ -1,0 +1,13 @@
+[Unit]
+Description=Athena External SSD (LUKS) mount
+After=dev-mapper-athena_external.device
+Requires=dev-mapper-athena_external.device
+
+[Mount]
+What=/dev/mapper/athena_external
+Where=/mnt/external
+Type=ext4
+Options=defaults,noatime
+
+[Install]
+WantedBy=multi-user.target
