@@ -6,6 +6,10 @@ description = "Athena alpha defense — 52-Flag Veto Gate (M1~M14, S_entry). Dep
 dependencies = [
     "athena-core",
     "athena-feature-store",
+    # Story 1.6 — KRX trading-day calendar for F5 readonly-mount systemd timer.
+    # `holidays.KR(years=...)` covers public holidays + 대체공휴일.
+    # KRX 임시 휴장 (자연재해 등) 은 scripts/check_trading_day.py --extra-closed-days-file 로 보강.
+    "holidays>=0.50,<1.0",
 ]
 
 [build-system]

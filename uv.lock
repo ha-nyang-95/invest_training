@@ -41,12 +41,14 @@ source = { editable = "packages/athena-alpha-defense" }
 dependencies = [
     { name = "athena-core" },
     { name = "athena-feature-store" },
+    { name = "holidays" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "athena-core", editable = "packages/athena-core" },
     { name = "athena-feature-store", editable = "packages/athena-feature-store" },
+    { name = "holidays", specifier = ">=0.50,<1.0" },
 ]
 
 [[package]]
@@ -401,6 +403,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/94/aa/f8a085ff73c37d6e6a37de9f58799a3fea9e16badf267aaef6f11c9a53a3/grimp-3.14-cp313-cp313t-musllinux_1_2_armv7l.whl", hash = "sha256:d0b19a3726377165fe1f7184a8af317734d80d32b371b6c5578747867ab53c0b", size = 2497925, upload-time = "2025-12-10T17:54:23.842Z" },
     { url = "https://files.pythonhosted.org/packages/5a/a3/db3c2d6df07fe74faf5a28fcf3b44fad2831d323ba4a3c2ff66b77a6520c/grimp-3.14-cp313-cp313t-musllinux_1_2_i686.whl", hash = "sha256:9caa4991f530750f88474a3f5ecf6ef9f0d064034889d92db00cfb4ecb78aa24", size = 2501794, upload-time = "2025-12-10T17:54:38.05Z" },
     { url = "https://files.pythonhosted.org/packages/e5/de/095f4e3765e7b60425a41e9fbd2b167f8b0acb957cc88c387f631778a09d/grimp-3.14-cp313-cp313t-musllinux_1_2_x86_64.whl", hash = "sha256:1876efc119b99332a5cc2b08a6bdaada2f0ad94b596f0372a497e2aa8bda4d94", size = 2515203, upload-time = "2025-12-10T17:54:52.555Z" },
+]
+
+[[package]]
+name = "holidays"
+version = "0.95"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dateutil" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/af/ab/003a4edf31234a3bc92b74b7d8ef18d1c1f019ed02dedd440d5c05f367cc/holidays-0.95.tar.gz", hash = "sha256:3b79fdd141cbc740526a5184d1cd41fd264fac4aba383554359d4bb6d52937d3", size = 887562, upload-time = "2026-04-20T20:26:10.215Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/54/e2/3a605baf0025b8ea819eea3ec4ca4ecb4d8c371975c1ca4bebd9979fae4c/holidays-0.95-py3-none-any.whl", hash = "sha256:5a204ff6d2ac2fff82fb5ca2a55dbbf265c2f952ca225c16b9ce12755664256d", size = 1453540, upload-time = "2026-04-20T20:26:08.425Z" },
 ]
 
 [[package]]
