@@ -18,6 +18,8 @@ from typing import Any
 
 import duckdb
 import pytest
+from athena.execution.ledger.dto import LedgerEntry
+from athena.execution.ledger.schema import create_pre_trade_ledger
 from athena.feature_store.schemas import (
     NewsRow,
     QuoteRow,
@@ -93,3 +95,23 @@ def test_ticks_column_types_pin_decimal_and_bigint() -> None:
         assert ddl_types[col].upper().startswith(expected), (
             f"type drift on ticks.{col}: got {ddl_types[col]!r}, expected prefix {expected!r}"
         )
+
+
+def test_ledger_entry_fields_match_pre_trade_ledger_raw_columns() -> None:
+    """Story 1.5 Task 1.7 — 4th table (pre_trade_ledger) parity.
+
+    Both `id` (sequence default) and `created_at_utc` (server-side `now()`)
+    are DB-owned defaults. DTO carries them as Optional so the read-back
+    round-trip (Story 6.1) can hydrate them from the row; the parity
+    check therefore sees them on both sides."""
+    conn = duckdb.connect(":memory:")
+    create_pre_trade_ledger(conn)
+    pragma = conn.execute("PRAGMA table_info('pre_trade_ledger_raw')").fetchall()
+    ddl_columns = {row[1] for row in pragma}
+    dto_fields = set(LedgerEntry.model_fields.keys())
+    missing_in_ddl = dto_fields - ddl_columns
+    missing_in_dto = ddl_columns - dto_fields
+    assert not missing_in_ddl, f"pre_trade_ledger_raw: DTO has fields not in DDL — {missing_in_ddl}"
+    assert not missing_in_dto, (
+        f"pre_trade_ledger_raw: DDL has columns not in DTO — {missing_in_dto}"
+    )
