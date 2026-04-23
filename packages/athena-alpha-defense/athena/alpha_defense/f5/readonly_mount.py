@@ -271,11 +271,15 @@ class ReadonlyMountController:
         first_error: str | None = None
 
         for path in self._protected_paths:
-            currently_immutable = self._executor.is_immutable(path)
-            if currently_immutable == target_immutable:
-                per_file[path] = "already"
-                continue
+            # Gemini PR #13 review (MEDIUM): the is_immutable() probe itself
+            # can raise (lsattr ENOENT on a file deleted mid-transition,
+            # subprocess timeout, etc). The except block now covers the
+            # whole per-path cycle so a flaky probe is recorded as "error"
+            # rather than crashing the whole transition.
             try:
+                if self._executor.is_immutable(path) == target_immutable:
+                    per_file[path] = "already"
+                    continue
                 if target_immutable:
                     self._executor.set_immutable(path)
                 else:

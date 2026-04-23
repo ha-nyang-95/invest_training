@@ -63,8 +63,13 @@ def _read_prev_timestamp(output_path: Path, metric_prefix: str) -> int:
     try:
         for line in output_path.read_text(encoding="utf-8").splitlines():
             if line.startswith(metric_prefix + " "):
-                return int(float(line.split()[1]))
-    except (OSError, ValueError):
+                # Gemini PR #13 review (MEDIUM): a truncated previous file
+                # (metric name present but no value) must not crash the emit
+                # pipeline. Defensive length check + IndexError fallback.
+                parts = line.split()
+                if len(parts) >= 2:
+                    return int(float(parts[1]))
+    except (OSError, ValueError, IndexError):
         return _NO_PREVIOUS_TIMESTAMP
     return _NO_PREVIOUS_TIMESTAMP
 

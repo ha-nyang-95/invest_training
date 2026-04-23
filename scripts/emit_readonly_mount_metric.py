@@ -18,13 +18,19 @@ from pathlib import Path
 from typing import Literal, cast
 
 from athena.alpha_defense.f5.metrics import emit_readonly_mount_metric
-from athena.alpha_defense.f5.readonly_mount import MountState
+from athena.alpha_defense.f5.readonly_mount import (
+    MountState,
+    ReadonlyMountController,
+    SubprocessChattrExecutor,
+)
 
-# An ExecStartPre exit-1 (non-trading day skip) is whitelisted via
-# SuccessExitStatus=0 1 in the unit, so systemd reports $EXIT_STATUS=0 for
-# the unit overall — but ExecStartPre's own non-zero short-circuits ExecStart.
-# We treat exit 0 = transitioned, anything else = no-op / failure (mount
-# state stays at whatever the prior emit recorded).
+# Gemini PR #13 review (2026-04-23, HIGH): unit files set
+# `SuccessExitStatus=0 1` so that `check_trading_day.py` returning 1 on a
+# KRX holiday counts as success. That means `$EXIT_STATUS` is ALWAYS 0 on
+# a clean run — it can no longer tell us whether the transition actually
+# fired. We read the real filesystem state via ReadonlyMountController
+# instead, and only count the run as a "successful_action" when both
+# $EXIT_STATUS=0 AND status() matches the requested action.
 _SUCCESS_EXIT = 0
 _UNKNOWN_EXIT = -1
 
@@ -41,18 +47,16 @@ def _parse_exit_code(raw: str) -> int:
         return _UNKNOWN_EXIT
 
 
-def _state_for(action: str, exit_code: int) -> MountState:
-    """Translate (action, exit) → resulting MountState.
-
-    On a non-success exit we cannot positively assert PARTIAL vs PRE-state
-    without re-running `f5 status`; PARTIAL is the safe pessimistic guess
-    so Story 1.9 alert rules will fire and the operator can investigate.
+def _actual_state() -> MountState:
+    """Read the real MountState via lsattr. On any unexpected failure
+    (missing file, sudo denied, ext4 anomaly) we fall back to PARTIAL so
+    Story 1.9's alert rule fires — better a false positive than silently
+    reporting LOCKED when the mount is in an unknown state.
     """
-    if exit_code != _SUCCESS_EXIT:
+    try:
+        return ReadonlyMountController(SubprocessChattrExecutor()).status()
+    except Exception:  # noqa: BLE001 — best-effort observability probe
         return MountState.PARTIAL
-    if action == "lock":
-        return MountState.LOCKED
-    return MountState.UNLOCKED
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -65,9 +69,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
 
-    state = _state_for(args.action, args.exit_code)
+    state = _actual_state()
+    target_state = MountState.LOCKED if args.action == "lock" else MountState.UNLOCKED
+    is_actual_success = args.exit_code == _SUCCESS_EXIT and state is target_state
     successful_action: Literal["lock", "unlock"] | None = (
-        cast(Literal["lock", "unlock"], args.action) if args.exit_code == _SUCCESS_EXIT else None
+        cast(Literal["lock", "unlock"], args.action) if is_actual_success else None
     )
     emit_readonly_mount_metric(
         state=state,
