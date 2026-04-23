@@ -1,0 +1,15 @@
+[Unit]
+# Athena F5 readonly-mount UNLOCK timer — Story 1.6 AC-2.
+# Fires the paired .service at 15:30 KST (KRX 정규장 close + 30s) on trading
+# weekdays so operator-side policy edits + 72h cooling can begin.
+Description=Athena F5 — Unlock policy at 15:30 KST (M-F, holidays handled by service)
+Requires=athena-readonly-mount-unlock.service
+
+[Timer]
+OnCalendar=Mon..Fri 15:30
+# See lock.timer for Persistent=false rationale (no auto-fire on late boot).
+Persistent=false
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

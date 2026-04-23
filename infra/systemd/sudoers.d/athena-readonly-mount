@@ -1,0 +1,19 @@
+# Athena F5 readonly-mount — NOPASSWD drop-in for chattr +i / -i.
+# Story 1.6 AC-2 Task 2.2. Installed by infra/systemd/athena-readonly-mount.install.sh
+# at /etc/sudoers.d/athena-readonly-mount with mode 0440 (root:root).
+#
+# Wildcards are FORBIDDEN here — Story 1.6 Source-of-Truth Invariant #7.
+# A wildcard like `/usr/sbin/chattr * /var/lib/athena/policy/*` would let
+# a compromised athena process or operator script also chattr +a (append-
+# only, blocks rotation), chattr +S (sync-write, hurts throughput), or
+# chattr -i a path it doesn't own. Enumerating the 4 exact commands keeps
+# the blast radius surgical.
+#
+# Adding a new protected file (e.g. tax_schedule.toml in Story 6.5) requires:
+#   1. Extending ReadonlyMountController.DEFAULT_PROTECTED_PATHS.
+#   2. Appending +i / -i pairs here for the new path.
+#   3. Re-running install.sh (which runs visudo -cf before replacing).
+khuk0 ALL=(root) NOPASSWD: /usr/sbin/chattr +i /var/lib/athena/policy/policy.toml
+khuk0 ALL=(root) NOPASSWD: /usr/sbin/chattr -i /var/lib/athena/policy/policy.toml
+khuk0 ALL=(root) NOPASSWD: /usr/sbin/chattr +i /var/lib/athena/policy/flag_registry.toml
+khuk0 ALL=(root) NOPASSWD: /usr/sbin/chattr -i /var/lib/athena/policy/flag_registry.toml

@@ -1,0 +1,29 @@
+[Unit]
+# F5 OVERRIDE_ATTEMPT inotify watcher — SCAFFOLD (Story 1.6 AC-4 Task 4.2).
+#
+# Story 3.5 will replace `ExecStart=` with the real watcher
+# (`python -m athena.alpha_defense.f5.inotify_watcher`) and add the
+# [Install] section to enable it. Story 1.6 only ships the unit skeleton
+# so `systemd-analyze verify` covers it and the install path is settled
+# in advance.
+Description=Athena F5 override-attempt watcher (Story 3.5 — scaffold in 1.6)
+Documentation=Story 3.5 wires ExecStart and adds [Install]
+After=local-fs.target
+ConditionPathExists=/var/lib/athena/policy/
+
+[Service]
+Type=simple
+User=khuk0
+Group=khuk0
+# SCAFFOLD: sleep infinity so `systemd-analyze verify` accepts the unit.
+# Story 3.5 swaps this for the real Python watcher entrypoint.
+ExecStart=/bin/sh -c "echo 'athena-inotify-watcher: scaffold — Story 3.5 will implement'; exec sleep infinity"
+Restart=on-failure
+RestartSec=30s
+StandardOutput=append:/var/log/athena/inotify-watcher.log
+StandardError=append:/var/log/athena/inotify-watcher.log
+
+# [Install] intentionally omitted — Story 1.6 must NOT enable this scaffold.
+# Story 3.5 adds:
+#   [Install]
+#   WantedBy=multi-user.target
