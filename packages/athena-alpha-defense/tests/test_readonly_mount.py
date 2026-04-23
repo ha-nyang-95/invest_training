@@ -137,6 +137,47 @@ def test_path_outside_protected_root_raises_value_error() -> None:
         ReadonlyMountController(fake, protected_paths=(PurePosixPath("/etc/passwd"),))
 
 
+def test_dotdot_traversal_path_rejected() -> None:
+    """Post-CR fix (2026-04-23): `..` segments must be rejected explicitly —
+    `PurePosixPath.relative_to` did not normalise them so paths like
+    `/var/lib/athena/policy/../../../etc/shadow` previously passed validation.
+    """
+    fake = FakeChattrExecutor()
+    with pytest.raises(ValueError, match=r"'\.\.'"):
+        ReadonlyMountController(
+            fake,
+            protected_paths=(PurePosixPath("/var/lib/athena/policy/../../../etc/shadow"),),
+        )
+
+
+def test_status_is_resilient_to_probe_exceptions() -> None:
+    """Post-CR fix (2026-04-23): `_transition` calls `status()` after the
+    per-path loop. An executor whose `is_immutable` raises on a deleted file
+    must not crash the whole transition — `status()` treats probe failures
+    as "not immutable" for aggregation purposes.
+    """
+
+    class FlakyExecutor:
+        def __init__(self) -> None:
+            self._state: dict[PurePosixPath, bool] = {PATH_A: True}
+
+        def set_immutable(self, path: PurePosixPath) -> None:  # pragma: no cover
+            self._state[path] = True
+
+        def clear_immutable(self, path: PurePosixPath) -> None:  # pragma: no cover
+            self._state[path] = False
+
+        def is_immutable(self, path: PurePosixPath) -> bool:
+            if path == PATH_B:
+                raise FileNotFoundError(f"simulated mid-transition deletion of {path}")
+            return self._state.get(path, False)
+
+    ctl = _controller(FlakyExecutor())
+    # status() must not propagate the FileNotFoundError — PATH_A True + PATH_B
+    # probe-fail counts as 1 immutable out of 2 → PARTIAL.
+    assert ctl.status() is MountState.PARTIAL
+
+
 def test_status_aggregates_three_states() -> None:
     # UNLOCKED — neither immutable.
     fake_unlocked = FakeChattrExecutor()

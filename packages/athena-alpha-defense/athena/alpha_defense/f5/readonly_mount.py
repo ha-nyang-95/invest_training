@@ -76,14 +76,20 @@ class ChattrExecutor(Protocol):
 
 
 def _run_sudo_chattr(args: list[str]) -> None:
-    """Internal helper — `sudo /usr/sbin/chattr <args>` with hardened invocation.
+    """Internal helper — `sudo -n /usr/sbin/chattr <args>` with hardened invocation.
 
     Story 1.5 Debug Log #1 (cp949 encoding trap) requires explicit utf-8 +
     errors="replace". sudoers NOPASSWD drop-in restricts the path to
     `/usr/sbin/chattr` with exactly the +i / -i pairs declared in
     `infra/systemd/sudoers.d/athena-readonly-mount` (Task 2.2).
+
+    Post-CR fix (2026-04-23): `-n` (non-interactive) so a misinstalled sudoers
+    drop-in fails fast with a clear error instead of hanging the whole
+    systemd oneshot up to `_SUBPROCESS_TIMEOUT_SECONDS` waiting for a password
+    prompt on a tty-less service. Mirrors `_ensure_sudo_chattr_nopasswd`
+    probe in `tests/integration/test_chattr_e2e.py`.
     """
-    cmd = ["sudo", "/usr/sbin/chattr", *args]
+    cmd = ["sudo", "-n", "/usr/sbin/chattr", *args]
     subprocess.run(  # noqa: S603 — argv list, no shell, sudoers-pinned binary
         cmd,
         check=True,
@@ -146,10 +152,19 @@ class DryRunChattrExecutor:
 
     Distinct from `FakeChattrExecutor` (tests/conftest.py): this is invoked
     from the CLI when an operator wants to preview lock/unlock without
-    privilege escalation. State is held in-memory for the lifetime of the
-    process so a `--dry-run lock` followed by `--dry-run status` reports
-    LOCKED. The Story 1.5 `init_external_backup.sh` `[dry-run]` prefix
-    convention is preserved on stdout.
+    privilege escalation.
+
+    State is in-memory and scoped to a single CLI invocation — each
+    `python -m athena.alpha_defense.f5 --dry-run <subcommand>` call gets a
+    fresh executor. Running `... --dry-run lock` followed by a separate
+    `... --dry-run status` invocation will therefore report UNLOCKED because
+    the state did not persist across processes. Within a single invocation
+    the in-memory state is consistent (e.g. a single call that internally
+    invokes lock + status sees the locked state). Post-CR docstring fix
+    (2026-04-23): the pre-patch wording implied cross-invocation persistence
+    which was never true; `test_unlock_dry_run_is_symmetric_to_lock` already
+    encoded the single-process scoping. The Story 1.5 `init_external_backup.sh`
+    `[dry-run]` prefix convention is preserved on stdout.
     """
 
     def __init__(self) -> None:
@@ -198,8 +213,18 @@ def _validate_protected_paths(paths: tuple[PurePosixPath, ...]) -> None:
     """Refuse paths outside `/var/lib/athena/policy/` — enforces architecture.md
     Gap-3 (chattr requires ext4, /mnt/c excluded) and prevents a caller from
     accidentally locking system files like /etc/passwd.
+
+    Post-CR fix (2026-04-23): `PurePosixPath.relative_to` does not normalise
+    `..` segments, so a path like `/var/lib/athena/policy/../../../etc/shadow`
+    would have passed the pre-patch check. We now reject `..` in `path.parts`
+    explicitly — the caller must supply a normalised path.
     """
     for p in paths:
+        if ".." in p.parts:
+            raise ValueError(
+                f"Protected path {p!s} contains '..' traversal segments; "
+                "F5 refuses non-normalised paths (post-CR guard, 2026-04-23)."
+            )
         try:
             p.relative_to(_PROTECTED_ROOT)
         except ValueError as exc:
@@ -256,7 +281,20 @@ class ReadonlyMountController:
         return self._protected_paths
 
     def status(self) -> MountState:
-        immutable_count = sum(1 for p in self._protected_paths if self._executor.is_immutable(p))
+        # Post-CR fix (2026-04-23): a mid-transition file deletion would cause
+        # `lsattr` (called inside SubprocessChattrExecutor.is_immutable) to
+        # raise CalledProcessError, which previously propagated out of
+        # `_transition`'s post-loop `new_state = self.status()` — crashing the
+        # CLI before it could return a LockTransition. Treat a probe failure
+        # as "not immutable" for aggregation; the per-path error is already
+        # recorded in `_transition.per_file_results`.
+        immutable_count = 0
+        for p in self._protected_paths:
+            try:
+                if self._executor.is_immutable(p):
+                    immutable_count += 1
+            except Exception:  # noqa: BLE001, S110 — best-effort probe, per-path error already recorded in LockTransition
+                pass
         return _classify_state(immutable_count, len(self._protected_paths))
 
     def lock(self) -> LockTransition:

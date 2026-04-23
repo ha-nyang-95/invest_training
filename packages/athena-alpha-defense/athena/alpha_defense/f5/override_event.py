@@ -58,6 +58,16 @@ class OverrideAttemptEvent:
                 "Naive datetimes break canonical JSON serialization in Story 3.1's "
                 "anti_ego_events SHA-256 chain."
             )
+        # Post-CR fix (2026-04-23): reject `..` before the prefix check.
+        # `PurePosixPath` does not normalise `..`, so `/var/lib/athena/policy/
+        # ../../../etc/shadow` would have passed the pre-patch `startswith`
+        # guard — the watcher (Story 3.5) should only supply normalised paths
+        # anyway, so we fail loudly on any `..` segment.
+        if ".." in self.target_path.parts:
+            raise ValueError(
+                f"OverrideAttemptEvent.target_path={self.target_path!s} contains "
+                "'..' traversal segments; inotify watcher must supply normalised paths."
+            )
         # str() avoids a Path.relative_to ValueError swallow + re-raise dance —
         # the protected-root prefix check is the same semantics with a clearer
         # error.

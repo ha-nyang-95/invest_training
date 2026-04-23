@@ -55,6 +55,22 @@ def test_target_path_outside_protected_root_rejected() -> None:
         )
 
 
+def test_target_path_with_dotdot_rejected() -> None:
+    """Post-CR fix (2026-04-23): `str(path).startswith("/var/lib/athena/policy/")`
+    previously admitted paths containing `..` because `PurePosixPath` does
+    not normalise segments. Explicit `..` rejection is now required.
+    """
+    with pytest.raises(ValueError, match=r"'\.\.'"):
+        OverrideAttemptEvent(
+            attempted_at_utc=datetime(2026, 4, 23, 12, 30, tzinfo=UTC),
+            target_path=PurePosixPath("/var/lib/athena/policy/../../../etc/shadow"),
+            inotify_event_mask="IN_MODIFY",
+            attempter_uid=1000,
+            attempter_pid=12345,
+            mount_state_at_attempt="LOCKED",
+        )
+
+
 def test_asdict_is_json_serialisable_with_default_str() -> None:
     event = _valid_event()
     payload = asdict(event)
