@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 import duckdb
@@ -35,6 +36,10 @@ def verify_chain(conn: duckdb.DuckDBPyConnection) -> list[dict[str, object]]:
     Each record has a `kind` of either `prev_hash_chain_break` or
     `this_hash_mismatch`. The two kinds are orthogonal — a row may raise one,
     the other, or both.
+
+    On `this_hash_mismatch` we advance `last_this` using the *recomputed* hash
+    rather than the stored (tampered) value, so a single tampered row does
+    not avalanche every downstream row into `prev_hash_chain_break` reports.
     """
     rows = conn.execute(
         "SELECT id, event_type, policy_version_git_sha, user_id, "
@@ -72,8 +77,39 @@ def verify_chain(conn: duckdb.DuckDBPyConnection) -> list[dict[str, object]]:
                     "recomputed_this": expected_this,
                 }
             )
-        last_this = this
+            last_this = expected_this
+        else:
+            last_this = this
     return mismatches
+
+
+_SEGMENT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _year_arg(raw: str) -> int:
+    v = int(raw)
+    if v < 2020 or v > 2100:
+        raise argparse.ArgumentTypeError(f"--year must be in [2020, 2100], got {v}")
+    return v
+
+
+def _load_prev_segment(path: Path) -> dict[str, str]:
+    """Validate `--prev-segment-json` payload shape + hex hash before use.
+
+    Falling into `verify_chain` with a malformed prev-segment file would have
+    surfaced as an opaque `VERIFY_FAILED` from the outer exception handler.
+    Failing here produces a specific, actionable error string.
+    """
+    body = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(body, dict):
+        raise ValueError(f"prev-segment JSON must be an object, got {type(body).__name__}")
+    missing = {"segment_hash", "month"} - body.keys()
+    if missing:
+        raise ValueError(f"prev-segment JSON missing keys: {sorted(missing)}")
+    seg = body["segment_hash"]
+    if not isinstance(seg, str) or not _SEGMENT_HASH_RE.match(seg):
+        raise ValueError(f"prev-segment `segment_hash` must be 64-char hex, got {seg!r}")
+    return body
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -85,8 +121,8 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Previous month's segment_hash.json — enables continuity check.",
     )
-    ap.add_argument("--year", type=int, default=None)
-    ap.add_argument("--month", type=int, default=None)
+    ap.add_argument("--year", type=_year_arg, default=None)
+    ap.add_argument("--month", type=int, default=None, choices=range(1, 13))
     args = ap.parse_args(argv)
 
     result: dict[str, object] = {
@@ -103,8 +139,12 @@ def main(argv: list[str] | None = None) -> int:
             if mismatches:
                 result["verdict"] = "CHAIN_BROKEN"
 
-            if args.prev_segment_json and args.year and args.month:
-                prev = json.loads(args.prev_segment_json.read_text(encoding="utf-8"))
+            if (
+                args.prev_segment_json is not None
+                and args.year is not None
+                and args.month is not None
+            ):
+                prev = _load_prev_segment(args.prev_segment_json)
                 seg = compute_segment_hash(
                     conn,
                     year=args.year,

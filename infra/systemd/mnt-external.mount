@@ -1,6 +1,6 @@
 [Unit]
 Description=Athena External SSD (LUKS) mount
-After=dev-mapper-athena_external.device
+After=cryptsetup.target dev-mapper-athena_external.device
 Requires=dev-mapper-athena_external.device
 
 [Mount]

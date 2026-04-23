@@ -51,21 +51,32 @@ def compute_segment_hash(
 
     segment_hash  = SHA256(prev_segment_hash || sorted_ids_hash
                            || policy_version_git_sha)
-    sorted_ids_hash = SHA256("\\n".join(str(id) for id in sorted(ids)))
+    sorted_ids_hash = SHA256("\\n".join(str(id) for id in ids))
                      when the month is non-empty, else SHA256(b"").
 
-    Separator for the outer hash input is `\\x00` — the null byte, which
-    never appears in valid UTF-8 so the concatenation is unambiguous without
-    length prefixes.
+    Ordering: the SQL query appends `ORDER BY id` so `ids` arrives sorted
+    ascending — the hash input therefore matches "sorted(ids)" without a
+    Python-side `sorted()` call.
+
+    Separator for the outer hash input is `\\x00`. By construction the
+    inputs are: (a) either empty or 64-char lowercase hex (`prev_segment_hash`),
+    (b) 64-char hex (`sorted_ids_hash`), (c) 40-char hex
+    (`policy_version_git_sha`) — none of which can contain a raw NUL, so the
+    concatenation is unambiguous without length prefixes. See
+    `hash_chain.py` module docstring for the broader argument.
     """
-    # DuckDB make_timestamp uses (year, month, day, hour, min, sec_float).
     # Month+1 with December → Jan of next year.
     next_year = year + (1 if month == 12 else 0)
     next_month = 1 if month == 12 else month + 1
+    # `created_at_utc` is TIMESTAMPTZ. `make_timestamp` returns a naive
+    # TIMESTAMP which DuckDB would coerce using the session timezone — on a
+    # Trading PC running KST that silently shifts the month boundary by 9h.
+    # Anchor the bucket to UTC by casting the literal to TIMESTAMPTZ with
+    # `AT TIME ZONE 'UTC'` so the comparison is timezone-invariant.
     rows = conn.execute(
         "SELECT id FROM pre_trade_ledger "
-        "WHERE created_at_utc >= make_timestamp(?, ?, 1, 0, 0, 0.0) "
-        "AND created_at_utc <  make_timestamp(?, ?, 1, 0, 0, 0.0) "
+        "WHERE created_at_utc >= make_timestamp(?, ?, 1, 0, 0, 0.0) AT TIME ZONE 'UTC' "
+        "AND created_at_utc <  make_timestamp(?, ?, 1, 0, 0, 0.0) AT TIME ZONE 'UTC' "
         "ORDER BY id",
         [year, month, next_year, next_month],
     ).fetchall()

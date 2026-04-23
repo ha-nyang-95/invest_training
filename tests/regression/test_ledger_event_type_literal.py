@@ -95,7 +95,6 @@ def test_illegal_event_type_rejected_by_mypy(tmp_path: Path) -> None:
     )
     # mypy writes the error to stdout (not stderr) by default.
     combined = result.stdout + result.stderr
-    assert "entry_authorized" in combined or "event_type" in combined, combined
     # The failing argument must be named `event_type` or the failure is for the
     # wrong reason (e.g. a missing import).
     assert "event_type" in combined, combined

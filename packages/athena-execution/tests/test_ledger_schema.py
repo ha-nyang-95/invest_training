@@ -36,7 +36,7 @@ def _genesis_insert(conn: duckdb.DuckDBPyConnection, *, prev_hash: str | None = 
         "(nextval('seq_pre_trade_ledger_id'), ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
             datetime.now(UTC),
-            "LedgerClient.v1.0.0",
+            "ledger_client.v0.1.0",
             "abcdef1234",
             1,
             "genesis",
@@ -132,7 +132,7 @@ def test_check_constraint_rejects_non_genesis_with_null_prev_hash() -> None:
             "(nextval('seq_pre_trade_ledger_id'), ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
             [
                 datetime.now(UTC),
-                "LedgerClient.v1.0.0",
+                "ledger_client.v0.1.0",
                 "abcdef1234",
                 1,
                 "schema_segment_transition",

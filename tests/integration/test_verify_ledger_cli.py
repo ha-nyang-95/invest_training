@@ -82,6 +82,52 @@ def test_missing_db_reports_verify_failed(tmp_path: Path) -> None:
     assert "error" in payload
 
 
+def test_month_out_of_range_rejected_by_argparse(tmp_path: Path) -> None:
+    """P5 regression — `--month 13` must fail at argparse, not crash inside
+    compute_segment_hash with an opaque VERIFY_FAILED verdict."""
+    db_path = tmp_path / "decisions.duckdb"
+    _seed(db_path)
+    result = _run(
+        [
+            "--db",
+            str(db_path),
+            "--year",
+            "2026",
+            "--month",
+            "13",
+            "--prev-segment-json",
+            str(tmp_path / "ignored.json"),
+        ]
+    )
+    assert result.returncode != 0
+    assert "month" in result.stderr or "month" in result.stdout
+
+
+def test_invalid_prev_segment_hash_rejected_with_specific_error(tmp_path: Path) -> None:
+    """P9 regression — malformed prev-segment JSON must surface a specific
+    error string, not an opaque KeyError via generic exception catch."""
+    db_path = tmp_path / "decisions.duckdb"
+    _seed(db_path)
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"month": "2025-12", "segment_hash": "not-hex"}), encoding="utf-8")
+    result = _run(
+        [
+            "--db",
+            str(db_path),
+            "--prev-segment-json",
+            str(bad),
+            "--year",
+            "2026",
+            "--month",
+            "4",
+        ]
+    )
+    assert result.returncode == 1
+    payload = json.loads(result.stdout)
+    assert payload["verdict"] == "VERIFY_FAILED"
+    assert "64-char hex" in payload["error"] or "segment_hash" in payload["error"]
+
+
 def test_prev_segment_json_populates_continuity(tmp_path: Path) -> None:
     db_path = tmp_path / "decisions.duckdb"
     _seed(db_path)

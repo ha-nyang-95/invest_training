@@ -11,9 +11,23 @@ The input layout is deliberately more than the epics.md narrative
   and user_id=2 chains.
 
 The extension is documented in Dev Notes §Invariant #3 and in the Change Log.
-Fields are joined with the `\x00` null byte — a value that never appears in
-valid UTF-8 strings, so the concatenation is unambiguous without length
-prefixes.
+Fields are joined with the `\x00` null byte. U+0000 is technically a valid
+UTF-8 code point (encoded as a single `\x00` byte), so the separator is not
+universally unambiguous — the concatenation is only unambiguous because
+each of the hashed components, by construction, cannot contain a raw NUL:
+
+* `payload_json` comes exclusively from `canonical_json` (= `json.dumps`),
+  which escapes U+0000 as the 6-char sequence `\\u0000` rather than emitting
+  a raw NUL byte. See the `canonical_json` docstring.
+* `policy_version_git_sha` is 40-char lowercase hex (git SHA) — no NUL.
+* `event_type` is a `LedgerEventTypeV1` Literal (`genesis` /
+  `schema_segment_transition`) — no NUL.
+* `user_id` is `str(int)` — digits only, no NUL.
+* `prev_hash` is 64-char lowercase hex or empty string — no NUL.
+
+A future Story that widens `event_type` (Story 6.1) or `payload_json`
+serialization MUST preserve this no-raw-NUL invariant or switch to a
+length-prefixed framing.
 
 Canonical JSON is the single serialization path. Every future Story (3.1,
 6.1, 6.2) that computes or verifies ledger hashes MUST call `canonical_json`
@@ -57,8 +71,12 @@ def compute_entry_hash(
     Non-genesis:
         SHA256(prev_hash || payload_json || policy_version_git_sha || event_type || user_id)
 
-    Separator: b"\\x00". The null byte never appears in valid UTF-8 so the
-    concatenation is unambiguous without length prefixes.
+    Separator: b"\\x00". U+0000 is valid UTF-8, but by module-level
+    construction (see module docstring) none of the hashed components can
+    contain a raw NUL — `canonical_json` escapes U+0000 as "\\u0000", hex
+    fields are `[0-9a-f]`, `event_type` is a constrained Literal, and
+    `user_id` is digits-only — so the concatenation is unambiguous without
+    length prefixes.
     """
     sep = b"\x00"
     prev = (prev_hash or "").encode("ascii")

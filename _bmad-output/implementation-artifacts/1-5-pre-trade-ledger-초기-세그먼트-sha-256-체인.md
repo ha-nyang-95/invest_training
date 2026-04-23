@@ -905,6 +905,67 @@ Execute **in order**. Mark `[x]` only when both implementation AND tests pass. R
   - [x] 7.5 sprint-status.yaml `1-5-*` → `review` + `last_updated=2026-04-23` 갱신 완료.
   - [ ] 7.6 핸드오프 commit: `chore(story-1.5): Pre-Trade Ledger SHA-256 chain substrate verified, hand off to Story 1.6` — signed. PR / squash merge 는 Khuk0 가 review 단계에서 WSL2 측에서 수행.
 
+### Review Findings (2026-04-23, bmad-code-review · 3-layer adversarial)
+
+3 병렬 레이어 실행 결과: Blind Hunter + Edge Case Hunter + Acceptance Auditor. Acceptance Auditor 은 6 AC · 11 Invariant · 7 Threat Model · File List 모두 conformance PASS. 아래는 Blind Hunter + Edge Case Hunter 가 중복 제거 후 남긴 32 finding 의 triage 결과.
+
+**Decision-needed (1) — Resolved 2026-04-23 via 옵션 C (혼합)**:
+
+- [x] [Review][Decision] **D1 — Monthly workflow 의 continuity/provision 검증 갭** — 옵션 C 채택: (a) `LEDGER_PROVISIONED=1` env flag gate 는 본 스토리에서 즉시 patch (P17 로 승격) — provision 이후 silent pass 전환을 차단. (b) continuity wiring (`--prev-segment-json` + `--year` + `--month` 호출) 은 Story 1.10 의 실 `LEDGER_DB_PATH` + `monthly_ledger_chain.py` 산출물 경로 wiring 과 함께 처리 — deferred-work.md W5 로 등록. 근거: provision flag 는 단순 bash gate 로 본 스토리에서 low-risk patch, continuity wiring 은 실 경로가 Trading PC 에서 확정되어야 정확히 계산되므로 1.10 의 backup automation 과 묶는 것이 설계상 자연스러움.
+
+**Patch (17)** — 모호하지 않은 수정:
+
+- [x] [Review][Patch] **P1 [CRITICAL] TIMESTAMPTZ vs naive `make_timestamp` 월 경계** [`packages/athena-execution/athena/execution/ledger/segment_hash.py:65-71`] — `created_at_utc` 는 `TIMESTAMPTZ` 이나 `make_timestamp(?, ?, 1, 0, 0, 0.0)` 는 naive `TIMESTAMP` 반환. DuckDB 는 naive literal 을 **세션 TZ** 로 interpret → Trading PC WSL2 가 KST 면 월 경계가 UTC 기준에서 9시간 밀림 → CI (UTC) 와 Trading PC (KST) 에서 동일 row 가 다른 월로 분기 → segment_hash 재현성 silent break. 수정: `make_timestamptz(?, ?, 1, 0, 0, 0.0, 'UTC')` 로 교체 또는 `TIMESTAMPTZ` 리터럴 + UTC offset.
+- [x] [Review][Patch] **P2 [MAJOR] Empty Keychain passphrase 통과** [`scripts/init_external_backup.sh:38-50`] — Keychain probe 가 예외만 catch, `get_secret()` 이 빈 문자열 반환 시 probe pass → `cryptsetup luksFormat` 에 empty passphrase 파이프 → zero-passphrase LUKS 볼륨 생성. 수정: probe 에 `if not get_secret(...): sys.exit(1)` + 최소 길이 (예: 16) assert 추가.
+- [x] [Review][Patch] **P3 [MAJOR] Object Lock `retention_years=0` silent bypass** [`scripts/init_s3_object_lock.py:29`] — `--retention-years 0` → `Days=0` → AWS 는 수락하고 retention 없음 == 즉시 삭제 가능. NFR-A2 "영구 보존" 우회. 수정: `type=lambda x: int(x) if int(x) >= 1 else argparse.error(...)` 또는 `choices=range(1, 100)`.
+- [x] [Review][Patch] **P4 [MAJOR] `eval "$@"` + env-controlled DEVICE hardening** [`scripts/init_external_backup.sh:14, 33`] — `run()` 은 `eval "$@"`, `$DEVICE`/`$MOUNT_POINT`/`$LUKS_NAME` 는 환경변수 source. `DEVICE='/dev/sdb1; rm -rf ~'` 같은 hostile 값이 sudo 하에서 arbitrary exec. Khuk0 본인 운영 local script + sudo 권한 필요 맥락이라 threat 은 낮으나 hardening 가치 있음. 수정: DEVICE 는 `^/dev/[a-zA-Z0-9/_-]+$` regex match, MOUNT_POINT 는 `^/mnt/[a-zA-Z0-9/_-]+$` 로 fail-fast.
+- [x] [Review][Patch] **P5 [MINOR] `verify_ledger.py` year/month argparse validator 누락** [`scripts/verify_ledger.py:88-89`] — `--month 0` / `--month 13` / `--year -1` 등이 argparse 에서 통과 → `compute_segment_hash` 안쪽 `make_timestamp` 에서 crash → `except Exception` 이 opaque `VERIFY_FAILED` 로 변환 → 사용자가 입력 오류 인지 어려움. 수정: `choices=range(1, 13)` on --month + `--year` 범위 validator (e.g. 2020-2100).
+- [x] [Review][Patch] **P6 [MINOR] `args.month` truthy check 으로 연속성 silent skip** [`scripts/verify_ledger.py:106`] — `if args.prev_segment_json and args.year and args.month:` 에서 `args.month == 0` 이 falsy → 연속성 block 이 조용히 skip. 수정: 모두 `is not None` 비교.
+- [x] [Review][Patch] **P7 [MINOR] `last_this` 무조건 업데이트 → avalanche mismatch** [`scripts/verify_ledger.py:75`] — `this_hash_mismatch` 감지 후에도 `last_this = this` 로 stored (tampered) 값이 다음 row 의 `expected_prev` 가 됨 → 변조 1건이 downstream 전부를 mismatch 로 만들어 audit 분류 혼란. 수정: mismatch 발견 시 `last_this = expected_this` (재계산값) 로 chain 계속.
+- [x] [Review][Patch] **P8 [MINOR] `_atomic_write_readonly` fsync 누락 + .tmp leak** [`scripts/monthly_ledger_chain.py:29-43`] — (a) `tmp.write_text` 후 `os.replace` 전 crash 시 `.tmp` 파일 orphan + 이전 chmod 0o644 상태 유지 → 다음 run 이 0o644 파일 위에 쓰기 window 존재. (b) `os.fsync` 및 parent dir fsync 없음 → 전원 장애 시 rename 반영 누락 가능. 수정: `try/finally` 로 `.tmp` unlink + `os.fsync(tmp.fileno())` + `os.fsync(target.parent.fileno())` (Linux only — Windows 는 skip).
+- [x] [Review][Patch] **P9 [MINOR] `--prev-segment-json` 스키마 validation 누락** [`scripts/verify_ledger.py:107`] — JSON 파일에 `segment_hash` 또는 `month` 키 부재 시 `KeyError` → `VERIFY_FAILED` opaque. 수정: `required_keys = {"segment_hash", "month"}` assert + 64-char hex regex on `segment_hash`.
+- [x] [Review][Patch] **P10 [NIT] `hash_chain.py` docstring — U+0000 은 valid UTF-8 1-byte** [`packages/athena-execution/athena/execution/ledger/hash_chain.py:15-16, 60-61`] — 주석 "The null byte never appears in valid UTF-8 strings" 는 기술적으로 부정확 (U+0000 은 UTF-8 `\x00` 1-byte). 현실적 안전성은 `canonical_json` 이 `json.dumps` 를 사용해 U+0000 → `" "` 6-char escape 로 serialize 하고 다른 입력 (event_type Literal, 40-hex policy sha, int user_id) 에 NUL 이 없어서 유지됨. 주석을 정확히: "payload_json 은 canonical_json 을 통과해 U+0000 이 `\\u0000` escape 되고, 다른 필드는 [a-z0-9.]+ 제한이라 raw NUL 진입점이 없음."
+- [x] [Review][Patch] **P11 [NIT] `segment_hash.py` docstring "sorted()" vs SQL ORDER BY** [`packages/athena-execution/athena/execution/ledger/segment_hash.py:52-55`] — docstring 은 `sorted(ids)` 라 하나 코드는 SQL `ORDER BY id` 에 의존. 결과 동일하나 docstring 정확화 또는 `ids = sorted(ids)` 명시 추가.
+- [x] [Review][Patch] **P12 [NIT] dead `or` branch in regression** [`tests/regression/test_ledger_event_type_literal.py`] — `"entry_authorized" in combined or "event_type" in combined` 뒤에 바로 `"event_type" in combined` 가 오므로 `or` 좌항 의미 없음. `"event_type" in combined` 단독으로 정리.
+- [x] [Review][Patch] **P13 [NIT] `test_ledger_schema.py` raw SQL fixture module_version case** [`packages/athena-execution/tests/test_ledger_schema.py`] — `"LedgerClient.v1.0.0"` (PascalCase) 가 raw SQL INSERT 에 하드코딩. 실 persisted 값은 `"ledger_client.v0.1.0"` (snake_case). DTO 우회이므로 기능 영향 없으나 future reader 가 snake_case 기대 위반 위험. 전체 snake_case 로 통일.
+- [x] [Review][Patch] **P14 [NIT] mnt-external.mount ordering** [`infra/systemd/mnt-external.mount:3-4`] — `After=dev-mapper-athena_external.device` 만 있고 `After=cryptsetup.target` 없음. systemd 는 device unit 의존성으로 retry 하지만 boot race 경고 저감 위해 `After=cryptsetup.target` 추가 권장.
+- [x] [Review][Patch] **P15 [NIT] `us-east-1` LocationConstraint 예외** [`scripts/init_s3_object_lock.py:75-79`] — 실 AWS `us-east-1` 은 `LocationConstraint=us-east-1` 을 reject. 기본 region 이 `ap-northeast-2` 이므로 발생 드물지만 runner/tester 가 us-east-1 을 설정할 경우 confusing 400. `if region == "us-east-1"` 시 `CreateBucketConfiguration` 생략.
+- [x] [Review][Patch] **P16 [NIT] `sudo` NOPASSWD 요구사항 playbook 기록** [`scripts/init_external_backup.sh:53, 56` + `docs/operating_playbook.md`] — `python3 -c "...passphrase..." | sudo cryptsetup ... -` 파이프는 sudo 가 password 프롬프트 시 passphrase 를 소모 → deadlock. `NOPASSWD` sudoers rule 이 필수. operating_playbook 의 Story 1.5 LUKS sub-section 에 "host setup prerequisite: cryptsetup 전용 NOPASSWD sudoers rule" 한 줄 추가.
+- [x] [Review][Patch] **P17 [MAJOR] `LEDGER_PROVISIONED` env gate 로 silent-pass 차단** [`.github/workflows/monthly-ledger-verify.yml:22-29`] — D1 옵션 C 결과. 현재 `if [[ ! -f "$DB_PATH" ]]; then exit 0` 은 Week 1-2 미provision 기간에는 정당하지만 provision 이후 우발적 DB 삭제/이동이 silent pass 로 변질될 위험. 수정: `LEDGER_PROVISIONED` env (repo secret 또는 Story 1.10 provisioner 가 setup 하는 runner env) 를 gate 로 사용 — unset 이면 "pre-provision, skip OK" (exit 0), `=1` 이면 DB missing → exit 1 + 명확한 ERROR 메시지. 환경변수 전환 시점이 provision event 로 기능.
+
+**Defer (5)** — 이미 deferred 또는 scope 경계에 부합, deferred-work.md 에 동기:
+
+- [x] [Review][Defer] **W1 Chain tip `SELECT … ORDER BY id DESC LIMIT 1`** [`packages/athena-execution/athena/execution/ledger/client.py:113-114`] — gap/replay ID 발생 시 잘못된 chain tip 선택 위험. V1.0 single-writer asyncio scope 에서는 문제없고 이미 deferred-work.md §11 ("multi-connection concurrent append — V1.1+") 로 scope 명시됨. V1.1+ 에서 chain tip 을 `prev_hash IS NULL` genesis 로부터 재구성하거나 `parent_id` 컬럼 도입 고려.
+- [x] [Review][Defer] **W2 DELETE 후 genesis 재시드 불가능** [`schema.sql:30` + `client.py:67-99`] — CHECK `(id = 1 AND prev_hash IS NULL)` + `nextval()` sequence 누적 진행 → `DELETE FROM pre_trade_ledger_raw` 후 새 LedgerClient 생성 시 id=2+ 로 genesis 시도 → CHECK 위반. AR-DATA4 "새 스키마 = 새 DuckDB 파일 + 새 세그먼트" 가 명시적 design 이라 같은 파일 재사용은 scope 밖. 그러나 운영 중 우발적 wipe 복구 시나리오가 threat model §#2 ("DB 파일 삭제 후 새로 생성") 와 부합 — deferred-work 에 "DELETE 후 복구 절차는 Story 6.2 가 `ALTER SEQUENCE RESTART` + 외장 SSD segment_hash 복원 procedure 로 다룬다" 명시적 등록.
+- [x] [Review][Defer] **W3 `_ensure_genesis` 명시적 transaction 누락** [`packages/athena-execution/athena/execution/ledger/client.py:67-99`] — DuckDB 는 single-statement autocommit 이라 `INSERT genesis` 단독은 atomic. 그러나 WAL checkpoint + crash 조합에서 sequence 가 advance 되고 genesis row 가 rollback 되는 corner case 이론적 가능. V1.0 low-probability 이나 V1.1+ 에서 `BEGIN ... COMMIT` 명시화 + sequence 복구 procedure 필요. Story 6.2 3-way verify 설계 시점에 재검토.
+- [x] [Review][Defer] **W4 Object Lock `retention_years × 365` 윤년 오차** [`scripts/init_s3_object_lock.py:89, backup.py`] — 이미 deferred-work.md §14 (retention_days 윤년 오차) 에 등록됨. Story 6.2 retention 정확화 범위.
+- [x] [Review][Defer] **W5 monthly-ledger-verify.yml continuity wiring** [`.github/workflows/monthly-ledger-verify.yml:28`] — D1 옵션 C 결과. 실 `LEDGER_DB_PATH` + `monthly_ledger_chain.py` 월간 산출물 경로가 Trading PC 에서 확정되어야 `--prev-segment-json` 을 정확히 전달 가능. Story 1.10 의 real cron tuning + `LEDGER_DB_PATH` env wiring 과 함께 처리. 본 스토리는 per-row this_hash 재계산만 CI 로 실행 (substrate).
+
+**Dismissed (11)** — 허위경보/의도적/spec sanctioned:
+- Hash `\x00` collision via payload_json raw NUL (canonical JSON 이 U+0000 escape 처리, collision 현실 경로 없음 — P10 docstring 정정으로 해소)
+- `compute_segment_hash` implicit ORDER BY 의존 (P11 docstring fix 로 처리, 기능 OK)
+- cron `0 20 1 * *` vs narrative "03:00 KST intent" drift (workflow comment 에 "가용성 우선 05:00 KST 지연 허용" 이미 명시)
+- `create_pre_trade_ledger` 매 `LedgerClient()` 호출 (single-process scope, idempotent 안전)
+- `computed_at_utc` ISO format `+00:00` vs `Z` (둘 다 valid ISO 8601)
+- `BucketAlreadyOwnedByYou` 이후 retention 재검증 없음 (`put_object_lock_configuration` 이 바로 override 수행)
+- `backup.py` year/month/user_id validation 누락 (pure SSOT function, CLI argparse 가 upstream validate)
+- `init_s3_object_lock.py:60` bare `except Exception` (`# noqa: BLE001 — exit-code boundary` 의도적)
+- `verify_ledger.py:121` bare `except Exception` (exit-code contract 의도, 동일 noqa 주석)
+- `print(body)` systemd journal 유출 (segment_hash 는 hash 자체, workflow comment "no ledger content leaves" 와 약한 충돌이나 CI substrate intent 범위)
+- `schema.sql` module_version pattern CHECK 부재 (DTO + LedgerClient 내부 controlled constant 로 enforce, raw SQL 경로 차단 이미 AST 검사)
+
+### Review Summary
+
+- Acceptance Auditor: **PASS** (6/6 AC · 11/11 Invariant · 7/7 Threat Model · File List 정합 · Sanctioned Divergence integrity 유지).
+- Triage: 1 decision (resolved 옵션 C) · 17 patch (1 CRITICAL / 4 MAJOR / 5 MINOR / 7 NIT) · 5 defer · 11 dismiss.
+- **Status 2026-04-23 진행 상황**: D1 resolve + 17 patch 모두 적용 완료. 5-gate post-patch 전수 green:
+  1. `uv sync --frozen --group dev` — pass (venv 재빌드 후 264 packages sync).
+  2. `uv run pytest -n auto` — **260 passed, 5 skipped in 11.26s** (baseline 256p + P3 regression 2 + P5/P9 regression 2 = +4, 모두 green).
+  3. `uv run pre-commit run --all-files` — 10 hooks pass (ruff · ruff-format · mypy · secret scan · yaml · toml · merge-conflict · EOL · trailing whitespace).
+  4. `uv run lint-imports` — 5 contracts Kept.
+  5. `uv build --package athena-execution --wheel` — schema.sql 포함 ledger/ 8개 파일 wheel 에 present.
+- Status: **review** (유지) — review-flip 재진입 준비 완료. WSL2 위임 커밋 1건 추가: `fix(story-1.5): apply 17 review patches (Story 1.5 review flip prep)`.
+
 ## Dev Notes
 
 ### Source-of-Truth Invariants (Story 1.5 가 Down-stream 전역에 고정하는 불변식)
@@ -1293,8 +1354,24 @@ Amelia (bmad-agent-dev) on claude-opus-4-7[1m], auto-mode.
 - `docs/operating_playbook.md` — `## Story 1.5` 섹션 + 6 번째 테이블 write-scope 안내 추가 (Task 7.1).
 - `_bmad-output/implementation-artifacts/deferred-work.md` — `## Deferred from: Story 1.5` 14 항목 (Task 7.3).
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` — `1-5-*` status `ready-for-dev` → `review`, `last_updated=2026-04-23` (Task 7.5).
-- `_bmad-output/implementation-artifacts/1-5-pre-trade-ledger-초기-세그먼트-sha-256-체인.md` — 본 파일 (status, task checkboxes, Dev Agent Record, File List, Change Log).
+- `_bmad-output/implementation-artifacts/1-5-pre-trade-ledger-초기-세그먼트-sha-256-체인.md` — 본 파일 (status, task checkboxes, Dev Agent Record, File List, Change Log, Review Findings).
 - `uv.lock` — `uv sync --group dev` 로 boto3 / moto / botocore-stubs + 파생 의존성 추가.
+- `_bmad-output/implementation-artifacts/deferred-work.md` — review W1-5 (chain tip ORDER BY · DELETE reseed · genesis transaction · continuity wiring · previously §14 leap year) 등록 (Change Log v0.3.0).
+
+**수정 (Review patch, Change Log v0.3.0):**
+- `packages/athena-execution/athena/execution/ledger/segment_hash.py` — P1 `make_timestamp` → `make_timestamp(...) AT TIME ZONE 'UTC'` TIMESTAMPTZ anchor, P11 docstring sorted()/ORDER BY 정확화.
+- `packages/athena-execution/athena/execution/ledger/hash_chain.py` — P10 docstring U+0000/UTF-8 정확화 + no-raw-NUL invariant 명시.
+- `scripts/init_external_backup.sh` — P2 Keychain empty/<16-char passphrase reject + P4 DEVICE/MOUNT_POINT/LUKS_NAME regex hardening.
+- `scripts/init_s3_object_lock.py` — P3 `_positive_retention_years` argparse type + P15 us-east-1 `LocationConstraint` 회피.
+- `scripts/verify_ledger.py` — P5 --year/--month argparse validator, P6 `is not None` 비교, P7 `last_this = expected_this` on mismatch (avalanche 차단), P9 `_load_prev_segment` schema validation.
+- `scripts/monthly_ledger_chain.py` — P8 fsync(tmp + parent dir) + `.tmp` try/finally cleanup.
+- `.github/workflows/monthly-ledger-verify.yml` — P17 `LEDGER_PROVISIONED` env gate.
+- `infra/systemd/mnt-external.mount` — P14 `After=cryptsetup.target` 추가.
+- `tests/regression/test_ledger_event_type_literal.py` — P12 dead `or` branch 제거.
+- `packages/athena-execution/tests/test_ledger_schema.py` — P13 `"LedgerClient.v1.0.0"` → `"ledger_client.v0.1.0"` 통일.
+- `docs/operating_playbook.md` — P16 cryptsetup NOPASSWD sudoers prerequisite 블록 추가.
+- `tests/integration/test_init_s3_object_lock_dryrun.py` — P3 regression test 2건 추가.
+- `tests/integration/test_verify_ledger_cli.py` — P5/P9 regression test 2건 추가.
 
 ## Change Log
 
@@ -1302,5 +1379,6 @@ Amelia (bmad-agent-dev) on claude-opus-4-7[1m], auto-mode.
 |---|---|---|---|
 | 2026-04-23 | 0.1.0 | Story 1.5 file created from epics.md (ready-for-dev). Comprehensive context engine analysis: 11 Source-of-Truth Invariants (pre_trade_ledger as 6th decisions.duckdb table, LedgerClient single entry-point, SHA-256 canonical form SSOT, canonical JSON, 2-target backup semantics, server-side vs client-side timestamp, object key SSOT, empty-month chain continuity, DuckDB trigger-absence application-layer 4-layer defense, 4-field prefix inheritance from 1.4, v1.0 Literal event_type subset), 13 Scope Boundary entries (full writer→6.1, anti_ego→3.1, real LUKS→1.10, real S3→1.10/6.2, 3-way verify→6.2, Prometheus rules→1.9, Global CB trigger→5.6, row-level trigger永久 impossible, multi-writer→V1.1+), 12 Previous Story Intelligence items (1.1/1.2/1.3/1.4 이관), 10 Architecture Pattern constraints, 7 Threat Model scenarios, 7 commit strategy commits, 7 Tasks (35+ subtasks), 6 ACs with detailed Given/When/Then. Dev-only dependency additions: boto3, botocore-stubs, optional moto[s3]. | Amelia via create-story skill |
 | 2026-04-23 | 0.2.0 | Story 1.5 implementation complete → review. All 7 Tasks [x], 6 ACs satisfied. Net +43 tests (256p/5s from 213p baseline). 5-gate green (uv sync frozen / pytest / pre-commit / lint-imports / wheel build w/ schema.sql). Sanctioned spec divergences: (a) `module_version` spec string `"LedgerClient.v1.0.0"` → `"ledger_client.v0.1.0"` to satisfy BaseDTO pattern; (b) OS Keychain enum `SecretName(StrEnum)` (not `KeychainKeys`), reused existing `LUKS_PASSPHRASE` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` rather than spec-suggested `ATHENA_*` names; (c) pytest `slow` marker registered; (d) `hash_chain.compute_entry_hash` extends epics narrative hash input to include event_type + user_id (collision + multi-user defense, documented in hash_chain.py docstring). Real LUKS init + real S3 bucket provisioning deferred to Story 1.10 per scope. All 7 signed commits deferred to WSL2 per `feedback_windows_host_commit_boundary.md`. | Amelia via bmad-dev-story |
+| 2026-04-23 | 0.3.0 | **Code review apply (bmad-code-review 3-layer adversarial, D1 resolved 옵션 C, 17 patch batch-applied, 5 defer synced to deferred-work.md)**. Triage: 1 decision · 17 patch (1 CRITICAL P1 `TIMESTAMPTZ vs naive make_timestamp` / 4 MAJOR P2-4+P17 / 5 MINOR P5-9 / 7 NIT P10-16) · 5 defer (W1-5) · 11 dismiss. Post-patch 5-gate: 260p/5s · pre-commit 10 hooks pass · lint-imports 5 Kept · wheel build w/ schema.sql. 신규 regression 테스트 +4: `test_retention_years_zero_rejected_at_boundary` (P3), `test_retention_years_negative_rejected_at_boundary` (P3), `test_month_out_of_range_rejected_by_argparse` (P5), `test_invalid_prev_segment_hash_rejected_with_specific_error` (P9). Acceptance Auditor 기존 PASS (6 AC · 11 Invariant · 7 Threat Model) 불변. | Amelia via bmad-code-review |
 | 2026-04-23 | 0.2.1 | Pre-review-flip audit cleanup: (a) `client.py:147` S101 `assert row is not None` → explicit `if row is None: raise RuntimeError(...)` (production-grade — ruff S101 block 해소, 동작 불변); (b) orphan DuckDB file `--out-root` (Story 1.4 `tests/integration/test_parquet_shard_export.py` 가 pytest 실행 시마다 repo root 에 12 KB DuckDB 파일 생성하는 leftover bug — Story 1.4 review-flip 에서 미발견) 삭제 + `.gitignore` 에 `/--out-root` 패턴 추가로 커밋 오염 차단 + `deferred-work.md` 에 Story 1.4 post-review-flip bug 로 기록 (근본 수사는 별도 bugfix 스토리); (c) ruff-format 재포맷 4파일 (`client.py`, `test_ledger_client.py`, `test_ledger_schema.py`, `test_ledger_event_type_literal.py`) 재-stage → index ↔ working tree AM 상태 해소. 5-gate 재측정: pre-commit all-files green, `pytest -n auto` = **257 passed, 4 skipped in 45s** (WSL2 Linux, 이전 256p/5s Windows 대비 +1 pass — integration 1건 WSL2 환경에서 활성). 관련없는 M 상태 8파일 (1-3 story md, athena-logger-sync.service, scripts/check_*.py, scripts/setup_branch_protection.sh, tests/integration/conftest.py, test_policy_cooling_gate.py) 은 `git ls-files --eol` 결과 index=LF / working=CRLF 만 차이 — 실 내용 변경 0건, Story 1.5 커밋에 비포함. | Amelia via bmad-dev-story (audit) |
 

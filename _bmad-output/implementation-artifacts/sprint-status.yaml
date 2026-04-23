@@ -1,5 +1,5 @@
 # generated: 2026-04-21
-# last_updated: 2026-04-23  # Story 1.5 implementation → review (AC-1~6 완주, 256p/8s, 5-gate green, wheel incl. schema.sql, DRY_RUN+moto 검증)
+# last_updated: 2026-04-23  # Story 1.5 review-apply: 3-layer adversarial code review (bmad-code-review), D1 옵션 C resolved, 17 patch applied (1 CRITICAL / 4 MAJOR / 5 MINOR / 7 NIT), 5 defer synced; post-patch 260p/11s, 5-gate green; status: review (유지)
 # project: invest_training
 # project_key: NOKEY
 # tracking_system: file-system
@@ -36,7 +36,7 @@
 
 generated: 2026-04-21
 last_updated: 2026-04-23
-# Story 1.5 (Pre-Trade Ledger SHA-256 chain substrate): review. 7 Tasks completed, 43 new tests (256p/8s), 5-gate green. Real LUKS/S3 deferred to Story 1.10. All commits WSL2-delegated.
+# Story 1.5 (Pre-Trade Ledger SHA-256 chain substrate): review (post-apply). 7 Tasks + 17 review patches applied, 260 passed / 5 skipped (11s), 5-gate green. Review findings: 1 decision resolved (옵션 C), 17 patch applied, 5 defer synced, 11 dismiss. Real LUKS/S3 + monthly continuity wiring deferred to Story 1.10. All commits WSL2-delegated.
 project: invest_training
 project_key: NOKEY
 tracking_system: file-system

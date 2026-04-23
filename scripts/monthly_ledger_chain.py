@@ -33,13 +33,36 @@ def _atomic_write_readonly(target: Path, body: str) -> None:
     the target already exists we first widen its mode back to 0o644 before
     the replace. Linux would accept the clobber regardless, but the pre-step
     is no-op-safe on Linux.
+
+    On Linux we fsync the tmp file + its parent directory before the replace
+    so that a crash between `write` and `replace` cannot leave the target
+    either missing or zero-length despite the rename having returned. On
+    Windows `os.fsync` on a directory fd is not supported, so we skip the
+    dir sync — the file-level sync still gives torn-write protection.
+
+    The `.tmp` file is unlinked in a `finally` block on failure so an
+    interrupted run does not orphan `.tmp` siblings next to the target.
     """
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
         target.chmod(0o644)
     tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(body, encoding="utf-8")
-    os.replace(str(tmp), str(target))
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(body)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(str(tmp), str(target))
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    if os.name != "nt":
+        # Parent-dir fsync is POSIX-only; Windows rejects it.
+        dir_fd = os.open(str(target.parent), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
     target.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)  # 0o444
 
 

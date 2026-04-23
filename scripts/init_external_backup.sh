@@ -17,6 +17,21 @@ LUKS_NAME="${LUKS_NAME:-athena_external}"
 KEY_KEYCHAIN_ID="${KEY_KEYCHAIN_ID:-LUKS_PASSPHRASE}"
 DRY_RUN="${DRY_RUN:-0}"
 
+# Input hardening — `run()` below does `eval "$@"` so env-controlled vars flow
+# through shell parsing. Reject shell-metacharacter injection at the boundary.
+if [[ -n "$DEVICE" && ! "$DEVICE" =~ ^/dev/[a-zA-Z0-9/_-]+$ ]]; then
+  echo "ERROR: DEVICE must match ^/dev/[a-zA-Z0-9/_-]+\$, got: $DEVICE" >&2
+  exit 1
+fi
+if [[ ! "$MOUNT_POINT" =~ ^/[a-zA-Z0-9/_-]+$ ]]; then
+  echo "ERROR: MOUNT_POINT must match ^/[a-zA-Z0-9/_-]+\$, got: $MOUNT_POINT" >&2
+  exit 1
+fi
+if [[ ! "$LUKS_NAME" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+  echo "ERROR: LUKS_NAME must match ^[a-zA-Z0-9_-]+\$, got: $LUKS_NAME" >&2
+  exit 1
+fi
+
 if [[ -z "$DEVICE" && "$DRY_RUN" == "0" ]]; then
   echo "ERROR: DEVICE (예: /dev/sdb1) 필수 — 또는 DRY_RUN=1 로 호출" >&2
   exit 1
@@ -33,17 +48,26 @@ run() {
   eval "$@"
 }
 
-# 1. LUKS 키 사전 확인 — OS Keychain 에 없으면 fail fast.
+# 1. LUKS 키 사전 확인 — OS Keychain 에 없거나 빈 문자열/너무 짧은 값이면 fail fast.
+# 빈 값이 cryptsetup stdin 으로 흘러가 zero-passphrase LUKS 볼륨을 만들지 않도록
+# 최소 길이 16 을 enforce (token_urlsafe(32) = 43 chars, 충분한 여유).
 if [[ "$DRY_RUN" == "0" ]]; then
   if ! python3 -c "
 import sys
 from athena.core.keyring_client import get_secret, SecretName
 try:
-    get_secret(SecretName.LUKS_PASSPHRASE)
+    v = get_secret(SecretName.LUKS_PASSPHRASE)
 except Exception:
     sys.exit(1)
+if not v or len(v) < 16:
+    sys.exit(3)
 "; then
-    echo "ERROR: OS Keychain 에 '${KEY_KEYCHAIN_ID}' 없음. 다음 명령으로 설정:" >&2
+    rc=$?
+    if [[ "$rc" == "3" ]]; then
+      echo "ERROR: OS Keychain '${KEY_KEYCHAIN_ID}' 이 빈 문자열이거나 길이 < 16. 재설정:" >&2
+    else
+      echo "ERROR: OS Keychain 에 '${KEY_KEYCHAIN_ID}' 없음. 다음 명령으로 설정:" >&2
+    fi
     echo "  python3 -c \"from athena.core.keyring_client import set_secret, SecretName; import secrets; set_secret(SecretName.LUKS_PASSPHRASE, secrets.token_urlsafe(32))\"" >&2
     exit 2
   fi

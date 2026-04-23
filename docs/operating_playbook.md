@@ -712,6 +712,22 @@ uv run python scripts/monthly_ledger_chain.py \
 
 ### LUKS 초기화 절차 (외장 SSD — W1 이후)
 
+**선행 host setup (WSL2 Ubuntu)** — `init_external_backup.sh` 는
+`python3 -c "...passphrase..." | sudo cryptsetup luksFormat ... -` 로
+Keychain 에서 읽은 passphrase 를 파이프로 흘린다. 이 때 `sudo` 가
+password 프롬프트를 띄우면 passphrase 가 sudo 프롬프트 로 소모되어
+deadlock. 따라서 **cryptsetup 전용 `NOPASSWD` sudoers rule** 이 필수:
+
+```bash
+# /etc/sudoers.d/athena-cryptsetup (chmod 440)
+khuk0 ALL=(root) NOPASSWD: /usr/sbin/cryptsetup, /usr/sbin/mkfs.ext4, /bin/mount, /bin/mkdir, /bin/chown
+```
+
+`visudo -f /etc/sudoers.d/athena-cryptsetup` 로 문법 검증 후 저장.
+Ubuntu 24.04 기본 `cryptsetup` 경로 `/usr/sbin/cryptsetup` 확인 필수
+(다른 배포판은 `which cryptsetup`). 이 `NOPASSWD` 는 LUKS bootstrap
+1회 + Story 1.10 의 backup automation 재실행에만 사용됨.
+
 1. 외장 SSD 연결 후 `lsblk` 로 device path 확인 (예: `/dev/sdb1`).
 2. LUKS passphrase 생성 + OS Keychain 에 저장 (Story 1.2 의
    `SecretName.LUKS_PASSPHRASE`):

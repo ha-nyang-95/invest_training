@@ -19,10 +19,16 @@ jobs:
           fetch-depth: 1
       - run: uv sync --frozen --group dev
       - name: Verify pre_trade_ledger chain
+        env:
+          LEDGER_PROVISIONED: ${{ vars.LEDGER_PROVISIONED || '0' }}
         run: |
           DB_PATH="${LEDGER_DB_PATH:-$HOME/.local/share/athena/decisions.duckdb}"
           if [[ ! -f "$DB_PATH" ]]; then
-            echo "NOTE: $DB_PATH not found — Trading PC decisions.duckdb not yet provisioned. Skipping verify step."
+            if [[ "$LEDGER_PROVISIONED" == "1" ]]; then
+              echo "ERROR: LEDGER_PROVISIONED=1 but $DB_PATH is missing — provisioned ledger DB disappeared." >&2
+              exit 1
+            fi
+            echo "NOTE: $DB_PATH not found + LEDGER_PROVISIONED unset — pre-provision phase, skipping verify."
             exit 0
           fi
           uv run python scripts/verify_ledger.py --db "$DB_PATH"

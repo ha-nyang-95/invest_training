@@ -17,6 +17,22 @@ import sys
 from athena.execution.ledger.backup import ObjectLockConfig
 
 
+def _positive_retention_years(raw: str) -> int:
+    """argparse type — reject `0` / negative / unreasonably large retention.
+
+    `--retention-years 0` would produce `Days=0` on the Object Lock config,
+    which AWS accepts as "no retention" — a silent NFR-A2 bypass. Cap at
+    100 years as a sanity bound (V1.0 fixes 5y via ObjectLockConfig default).
+    """
+    try:
+        v = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"retention-years must be integer, got {raw!r}") from exc
+    if v < 1 or v > 100:
+        raise argparse.ArgumentTypeError(f"retention-years must be in [1, 100], got {v}")
+    return v
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Initialise S3 bucket with Object Lock Compliance")
     ap.add_argument(
@@ -26,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--bucket", required=True)
     ap.add_argument("--region", default="ap-northeast-2")
-    ap.add_argument("--retention-years", type=int, default=5)
+    ap.add_argument("--retention-years", type=_positive_retention_years, default=5)
     ap.add_argument(
         "--dry-run",
         action="store_true",
@@ -71,12 +87,18 @@ def main(argv: list[str] | None = None) -> int:
         aws_access_key_id=aws_key,
         aws_secret_access_key=aws_secret,
     )
+    # AWS rejects `CreateBucketConfiguration={"LocationConstraint": "us-east-1"}`
+    # with `InvalidLocationConstraint` because us-east-1 is the default region
+    # and must not be explicit. For every other region the constraint is
+    # required.
+    create_kwargs: dict[str, object] = {
+        "Bucket": cfg.bucket,
+        "ObjectLockEnabledForBucket": True,
+    }
+    if cfg.region != "us-east-1":
+        create_kwargs["CreateBucketConfiguration"] = {"LocationConstraint": cfg.region}
     try:
-        s3.create_bucket(
-            Bucket=cfg.bucket,
-            CreateBucketConfiguration={"LocationConstraint": cfg.region},
-            ObjectLockEnabledForBucket=True,
-        )
+        s3.create_bucket(**create_kwargs)
     except s3.exceptions.BucketAlreadyOwnedByYou:
         print(f"NOTE: bucket {cfg.bucket} already exists — continuing")
     s3.put_object_lock_configuration(
