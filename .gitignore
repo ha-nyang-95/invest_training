@@ -38,4 +38,9 @@ node_modules/
 
 # OS
 .DS_Store
+
+# Story 1.4 leftover — `tests/integration/test_parquet_shard_export.py` 가
+# repo root 에 `--out-root` 이름의 orphan DuckDB 파일을 생성.
+# 근본 원인 수사 + 해결은 deferred-work.md (Story 1.4 leftover) 참조.
+/--out-root
 Thumbs.db

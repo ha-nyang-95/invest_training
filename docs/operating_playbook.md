@@ -642,22 +642,132 @@ these five checks in order — each is cheap and narrows the cause fast:
 
 ### Trading PC Write-Scope Invariant
 
-Trading PC writes ONLY to these five `decisions.duckdb` tables:
+Trading PC writes ONLY to these five `decisions.duckdb` tables via
+`FeatureStore.insert_*`:
 
-- `modules_output` — Story 1.5 (Pre-Trade Ledger)
+- `modules_output` — Story 1.5 (Pre-Trade Ledger substrate companion)
 - `decisions` — Story 1.5
 - `orders` — Story 4.3
 - `anti_ego_events` — Story 3.1
 - `labels_f1` — Story 3.3
+
+Plus the 6th table — `pre_trade_ledger` — which has its own dedicated
+writer `athena.execution.ledger.client.LedgerClient.append` (Story 1.5
+AC-2). FeatureStore intentionally does NOT expose `insert_ledger_entry`;
+the ledger lives on its own client so the Story 1.9 ruff rule can target
+`INSERT INTO pre_trade_ledger_raw` in any non-LedgerClient file without
+confusion.
 
 `ticks` / `quotes` / `news` are Logger PC's exclusive writer zone; Trading
 PC reads them via Parquet external scan (`parquet_reader.attach_parquet_views`).
 Defenders:
 
 - `tests/regression/test_trading_pc_write_scope.py` — introspects
-  `FeatureStore` for exactly five `insert_*` methods and greps
-  `feature_query.py` for any forbidden INSERT against Logger tables.
+  `FeatureStore` for exactly five `insert_*` methods, introspects
+  `LedgerClient` for exactly one public `append` method, and greps the
+  repo for any `INSERT INTO pre_trade_ledger_raw` literal outside
+  `packages/athena-execution/athena/execution/ledger/client.py`.
 
-Any reviewer considering adding a sixth `insert_*` must update both the
-invariant test's expected set AND Source-of-Truth Invariant #3 in the
-story file.
+Any reviewer considering adding a sixth `insert_*` to FeatureStore OR a
+second public write method to LedgerClient must update both the invariant
+test's expected set AND the corresponding Source-of-Truth Invariant (#3
+for FeatureStore, Story 1.5 §Invariant #2 for LedgerClient).
+
+## Story 1.5 — Pre-Trade Ledger 초기 세그먼트 & SHA-256 체인
+
+### Ledger 초기화 절차
+
+`LedgerClient(conn)` 생성 시 `pre_trade_ledger` DDL (raw table + view +
+sequence + CHECK) 이 idempotent 으로 적용되고, id=1 genesis entry 가
+자동 seed 된다. 재생성해도 genesis 가 중복 삽입되지 않는다.
+
+```bash
+uv run python -c "\
+from pathlib import Path; \
+from athena.feature_store.duckdb_client import open_decisions_duckdb; \
+from athena.execution.ledger import LedgerClient; \
+conn = open_decisions_duckdb(Path('data/duckdb/decisions.duckdb')); \
+client = LedgerClient(conn); \
+print(conn.execute('SELECT id, event_type, prev_hash IS NULL FROM pre_trade_ledger').fetchall())"
+```
+
+첫 실행 → `[(1, 'genesis', True)]`. 두 번째 실행도 같은 결과 (idempotent).
+
+### 월말 Segment Hash 수동 실행
+
+Story 1.10 이 systemd timer + `athena-backup.service` 로 자동화하기 전까지는
+수동으로 실행한다. `--out-local` 은 LUKS 마운트 `/mnt/external` 하위,
+`--s3-placeholder` 는 Story 6.2 가 실 S3 업로드로 대체할 mirror 디렉토리.
+
+```bash
+uv run python scripts/monthly_ledger_chain.py \
+  --db data/duckdb/decisions.duckdb \
+  --year 2026 --month 4 \
+  --out-local /mnt/external/ledger/user_id=1/year=2026/month=04/segment_hash.json \
+  --s3-placeholder data/s3-mirror/ledger/user_id=1/year=2026/month=04/segment_hash.json
+```
+
+산출 JSON 은 `chmod 444` 로 내려간다. 재실행 시 스크립트가 먼저 `0o644`
+로 풀고 `os.replace` 후 다시 read-only — 리눅스·윈도우 모두 idempotent.
+
+### LUKS 초기화 절차 (외장 SSD — W1 이후)
+
+1. 외장 SSD 연결 후 `lsblk` 로 device path 확인 (예: `/dev/sdb1`).
+2. LUKS passphrase 생성 + OS Keychain 에 저장 (Story 1.2 의
+   `SecretName.LUKS_PASSPHRASE`):
+   ```bash
+   uv run python -c "\
+   from athena.core.keyring_client import set_secret, SecretName; \
+   import secrets; \
+   set_secret(SecretName.LUKS_PASSPHRASE, secrets.token_urlsafe(32)); \
+   print('saved')"
+   ```
+3. 명령 시퀀스 선험: `DRY_RUN=1 bash scripts/init_external_backup.sh`.
+4. 실 실행: `DEVICE=/dev/sdb1 bash scripts/init_external_backup.sh`.
+5. 검증: `ls -la /mnt/external/ledger/` 및 `lsblk` 의 `crypt` 항목.
+
+`infra/systemd/mnt-external.mount` 는 git tracked 되어 있지만 실
+`sudo systemctl enable --now mnt-external.mount` 은 Story 1.10 에서 수행.
+
+`shellcheck scripts/init_external_backup.sh` 는 CI 에 아직 없으므로
+주기적으로 로컬에서 수동 실행 (Story 1.9 에서 pre-commit hook 편입 검토).
+
+### S3 Object Lock Bucket 생성 절차
+
+1. `DRY_RUN` 선험 — 실 credential 없이 계획 확인:
+   ```bash
+   uv run python scripts/init_s3_object_lock.py \
+     --bucket athena-ledger-prod \
+     --region ap-northeast-2 \
+     --dry-run
+   ```
+   stdout: `[dry-run] Object Lock: mode=COMPLIANCE, retention_days=1825`.
+2. AWS (or Naver Cloud Object Storage) credential 을 OS Keychain 에 등록:
+   `SecretName.S3_ACCESS_KEY_ID`, `SecretName.S3_SECRET_ACCESS_KEY`.
+3. Compliance bucket 실 생성 (root 계정도 삭제 불가, 최소 5년 retention):
+   `uv run python scripts/init_s3_object_lock.py --bucket athena-ledger-prod`.
+   (Naver Cloud 사용 시 `--endpoint-url https://kr.object.ncloudstorage.com`.)
+4. 생성 후 Story 1.10 이 systemd timer 로 월간 업로드 enable.
+
+### Ledger Integrity Alert 진단
+
+`scripts/verify_ledger.py` 는 exit code + stdout JSON `verdict` 를 emit.
+Story 1.9 Prometheus rule + Story 5.6 Global CB hook 이 본 contract 를
+consume 한다.
+
+- **`verdict == "CHAIN_BROKEN"`** (exit 1) — `mismatches[]` 비우지 말 것.
+  1. 각 mismatch 의 `id` / `kind` 기록 (`this_hash_mismatch` 면 payload
+     변조, `prev_hash_chain_break` 면 chain 끊어짐).
+  2. 최근 24h 동안 decisions.duckdb 를 touch 한 프로세스 감사 (`stat`,
+     `journalctl -u athena-*`).
+  3. 외장 SSD + S3 의 마지막 month segment_hash.json 조회해 "정상적으로
+     chain 되었던 마지막 id" 확인.
+  4. 복구 필요 시 Story 6.2 의 3-way verify (SSD ↔ S3 ↔ DB 재계산) 실행.
+  5. 준법감시인 통지 (FR45 / Story 6.6): 변조 의심 즉시 이메일 발송.
+- **`verdict == "VERIFY_FAILED"`** (exit 1, `error` key 동반) — DB 접근
+  자체 실패:
+  1. DB 파일 존재 / 권한 / 락 확인 (`lsof data/duckdb/decisions.duckdb`).
+  2. DuckDB 버전 호환성 확인 (1.x 마이너 버전 drift → schema re-init).
+  3. `open_decisions_duckdb` 재시도, 실패 시 systemd 서비스 재기동.
+  4. 직후 `--prev-segment-json` 없이 full chain verify 재실행.
+  5. 계속 실패 시 Story 5.6 Global CB 발동 → Paper-only 자동 전환.
