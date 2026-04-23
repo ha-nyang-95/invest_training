@@ -7,7 +7,10 @@
 # so `systemd-analyze verify` covers it and the install path is settled
 # in advance.
 Description=Athena F5 override-attempt watcher (Story 3.5 — scaffold in 1.6)
-Documentation=Story 3.5 wires ExecStart and adds [Install]
+# Documentation= requires URL-formatted values (systemd.unit(5));
+# the full context lives in the repo so we skip the directive entirely.
+# Replacement in Story 3.5 will set:
+#   Documentation=file:///home/khuk0/invest_training/docs/operating_playbook.md
 After=local-fs.target
 ConditionPathExists=/var/lib/athena/policy/
 
