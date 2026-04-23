@@ -116,18 +116,24 @@ install_sudoers() {
     exit 1
   fi
   # visudo -cf is non-destructive — bad syntax leaves /etc/sudoers untouched.
-  # We MUST validate before sudo install, since a corrupt /etc/sudoers.d/
-  # entry breaks `sudo` itself.
-  if ! sudo visudo -cf "$src" >/dev/null; then
-    echo "ERROR: visudo -cf failed on $src — refusing to install." >&2
-    exit 1
+  # Some distros let visudo -cf run without sudo (it only reads the given
+  # file); others require root. We try the unprivileged path first, then
+  # fall back to sudo. In DRY_RUN we skip the real check entirely: CI
+  # runners often have no interactive sudo, and the real install path
+  # still validates before touching /etc/sudoers.d/.
+  if [[ "$DRY_RUN" == "1" ]]; then
+    dry "visudo -cf $src (validate sudoers syntax)"
+    dry "install -m 0440 -o root -g root $src -> $SUDOERS_DIR/$SUDOERS_FILE"
+    return
+  fi
+  if ! visudo -cf "$src" >/dev/null 2>&1; then
+    if ! sudo visudo -cf "$src" >/dev/null; then
+      echo "ERROR: visudo -cf failed on $src — refusing to install." >&2
+      exit 1
+    fi
   fi
   if [[ -f "$SUDOERS_DIR/$SUDOERS_FILE" ]] && cmp -s "$src" "$SUDOERS_DIR/$SUDOERS_FILE"; then
     echo "skip sudoers/$SUDOERS_FILE (already installed and identical)"
-    return
-  fi
-  if [[ "$DRY_RUN" == "1" ]]; then
-    dry "install -m 0440 -o root -g root $src -> $SUDOERS_DIR/$SUDOERS_FILE"
     return
   fi
   sudo install -m 0440 -o root -g root "$src" "$SUDOERS_DIR/$SUDOERS_FILE"
