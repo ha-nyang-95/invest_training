@@ -21,10 +21,18 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import holidays
+
+# Post-CR fix (2026-04-23): `date.today()` returns the system-local calendar
+# date. For a 09:00 KST timer (00:00 UTC) on a UTC-set host, `date.today()`
+# would return the prior-day Sunday on a Monday KST open and trigger a bogus
+# "weekend" skip. `install.sh` only *warns* on non-Asia/Seoul TZ, so we defend
+# in Python by anchoring the predicate to KST.
+_KST = ZoneInfo("Asia/Seoul")
 
 
 def _parse_iso_date(raw: str) -> date:
@@ -91,7 +99,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    today = args.as_of if args.as_of is not None else date.today()  # noqa: DTZ011 — local date intentional
+    today = args.as_of if args.as_of is not None else datetime.now(_KST).date()
     # `country_holidays` is the typed factory; the `holidays.KR` shorthand
     # is dynamically generated and not visible to mypy.
     kr = holidays.country_holidays("KR", years=today.year)
